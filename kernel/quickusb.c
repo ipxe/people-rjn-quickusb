@@ -11,150 +11,142 @@
  */
 
 #include <linux/module.h>
-#include <linux/list.h>
 #include <linux/fs.h>
-#include <linux/devfs_fs_kernel.h>
+#include <linux/kref.h>
 #include <linux/usb.h>
+#include <asm/uaccess.h>
 
 #define QUICKUSB_VENDOR_ID 0x0fbb
 #define QUICKUSB_DEVICE_ID 0x0001
 
-#define QUICKUSB_MAX_SUBDEV 16
-#define QUICKUSB_SUBDEV_MASK ( QUICKUSB_MAX_SUBDEV - 1 )
-#define QUICKUSB_BOARD( dev_minor ) ( (dev_minor) / QUICKUSB_MAX_SUBDEV )
-#define QUICKUSB_SUBDEV( dev_minor ) ( (dev_minor) & QUICKUSB_SUBDEV_MASK )
-#define QUICKUSB_MINOR( board, subdev ) \
-	( (board) * QUICKUSB_MAX_SUBDEV + (subdev) )
+#define QUICKUSB_MINOR_BASE 0
 
-#define QUICKUSB_SUBDEV_GPPIO_A 0
+#define QUICKUSB_BREQUEST 0xb3
+#define QUICKUSB_BREQUESTTYPE_READ 0xc0
+#define QUICKUSB_BREQUESTTYPE_WRITE 0x40
+#define QUICKUSB_MAX_DATA_LEN 64
+#define QUICKUSB_TIMEOUT ( 1 * HZ )
 
 static int debug = 0;
-static int dev_major = 0;
+
+static DECLARE_MUTEX ( quickusb_lock );
+
+static struct usb_driver quickusb_driver;
 
 struct quickusb_device {
 	struct usb_device *usbdev;
-	unsigned int board;
-	unsigned long subdevs;
-	struct list_head list;
+	struct usb_interface *interface;
+	struct kref kref;
 };
 
-static LIST_HEAD ( quickusb_list );
-static DECLARE_MUTEX ( quickusb_lock );
+static void quickusb_delete ( struct kref *kref ) {
+	struct quickusb_device *quickusb;
 
-static const char *quickusb_subdev_name ( unsigned int subdev ) {
-	switch ( subdev ) {
-	case QUICKUSB_SUBDEV_GPPIO_A:
-		return "gppio_a";
-	default:
-		return NULL;
-	}
+	quickusb = container_of ( kref, struct quickusb_device, kref );
+	usb_put_dev ( quickusb->usbdev );
+	kfree ( quickusb );
 }
 
-static int quickusb_gppio_read ( struct file *file, char __user *buf,
+static int quickusb_gppio_read ( struct file *file, char __user *user_data,
 				 size_t len, loff_t *ppos ) {
-	return 0;
+	struct quickusb_device *quickusb = file->private_data;
+	struct usb_device *usbdev = quickusb->usbdev;
+	unsigned char data[QUICKUSB_MAX_DATA_LEN];
+	unsigned int frag_len;
+	int rc = 0;
+
+	while ( len ) {
+		frag_len = ( len < sizeof ( data ) ) ? len : sizeof ( data );
+		if ( ( rc = usb_control_msg ( usbdev,
+					      usb_sndctrlpipe ( usbdev, 0 ),
+					      QUICKUSB_BREQUEST,
+					      QUICKUSB_BREQUESTTYPE_WRITE,
+					      0, 1, data, frag_len,
+					      QUICKUSB_TIMEOUT ) ) != 0 )
+			goto out;
+		if ( ( rc = copy_to_user ( user_data, data, frag_len ) ) != 0 )
+			goto out;
+		len -= frag_len;
+		user_data += frag_len;
+	}
+
+ out:
+	return rc;
 }
 
 static ssize_t quickusb_gppio_write ( struct file *file,
-				      const char __user *buf,
+				      const char __user *user_data,
 				      size_t len, loff_t *ppos ) {
-	return 0;
+	struct quickusb_device *quickusb = file->private_data;
+	struct usb_device *usbdev = quickusb->usbdev;
+	unsigned char data[QUICKUSB_MAX_DATA_LEN];
+	unsigned int frag_len;
+	int rc = 0;
+
+	while ( len ) {
+		frag_len = ( len < sizeof ( data ) ) ? len : sizeof ( data );
+		if ( ( rc = copy_from_user ( data, user_data,
+					     frag_len ) ) != 0 )
+			goto out;
+		if ( ( rc = usb_control_msg ( usbdev,
+					      usb_sndctrlpipe ( usbdev, 0 ),
+					      QUICKUSB_BREQUEST,
+					      QUICKUSB_BREQUESTTYPE_WRITE,
+					      0, 1, data, frag_len,
+					      QUICKUSB_TIMEOUT ) ) != 0 )
+			goto out;
+		len -= frag_len;
+		user_data += frag_len;
+	}
+
+ out:
+	return rc;
 }
 
-static struct file_operations quickusb_gppio_fops = {
-	.owner		= THIS_MODULE,
-	.read		= quickusb_gppio_read,
-	.write		= quickusb_gppio_write,
-};
-
 static int quickusb_open ( struct inode *inode, struct file *file ) {
-	unsigned int board = QUICKUSB_BOARD ( iminor ( inode ) );
-	unsigned int subdev = QUICKUSB_SUBDEV ( iminor ( inode ) );
-	struct quickusb *quickusb;
-	int found = 0;
-
-	/* Identify board */
-	down ( &quickusb_lock );
-	list_for_each_entry ( quickusb, &quickusb_list, list ) {
-		if ( quickusb->board == board ) {
-			found = 1;
-			break;
-		}
-	}
-	if ( 
-	up ( &quickusb_lock );
-	if ( ! found )
+	struct usb_interface *interface;
+	struct quickusb_device *quickusb;
+	
+	interface = usb_find_interface ( &quickusb_driver, iminor ( inode ) );
+	if ( ! interface )
 		return -ENODEV;
 
-	file->private_data = ;
+	quickusb = usb_get_intfdata ( interface );
+	if ( ! quickusb )
+		return -ENODEV;
 
-	/* Select subdev-specific file operations table */
-	switch ( subdev ) {
-	case QUICKUSB_SUBDEV_GPPIO_A:
-		file->f_op = &quickusb_gppio_fops;
-		break;
-	default:
-		return -ENXIO;
-	}
-
-	if ( file->f_op && file->f_op->open )
-		return file->f_op->open ( inode, file );
+	kref_get ( &quickusb->kref );
+	file->private_data = quickusb;
 
 	return 0;
 }
 
 static int quickusb_release ( struct inode *inode, struct file *file ) {
-	struct quickusb *quickusb = file->private_data;
+	struct quickusb_device *quickusb = file->private_data;
 
-	usb_put_dev ( quickusb->dev );
+	kref_put ( &quickusb->kref, quickusb_delete );
+	return 0;
 }
 
 static struct file_operations quickusb_fops = {
 	.owner		= THIS_MODULE,
 	.open		= quickusb_open,
+	.read		= quickusb_gppio_read,
+	.write		= quickusb_gppio_write,
+	.release	= quickusb_release,
 };
 
-static void quickusb_destroy_devices ( struct quickusb_device *quickusb ) {
-	unsigned int subdev;
-
-	for ( subdev = 0 ; subdev < QUICKUSB_MAX_SUBDEV ; subdev++ ) {
-		if ( ! ( quickusb->subdevs & ( 1 << subdev ) ) )
-			continue;
-		devfs_remove ( "quickusb/%d/%s", quickusb->board,
-			       quickusb_subdev_name ( subdev ) );
-	}
-}
-
-static int quickusb_create_devices ( struct quickusb_device *quickusb ) {
-	unsigned int subdev;
-	unsigned int dev_minor;
-	const char *name;
-	dev_t dev;
-	int rc;
-
-	for ( subdev = 0 ; subdev < QUICKUSB_MAX_SUBDEV ; subdev++ ) {
-		dev_minor = QUICKUSB_MINOR ( quickusb->board, subdev );
-		dev = MKDEV ( dev_major, dev_minor );
-		name = quickusb_subdev_name ( subdev );
-		if ( ! name )
-			continue;
-		if ( ( rc = devfs_mk_cdev ( dev,
-					    ( S_IFCHR | S_IRUSR | S_IWUSR ),
-					    "quickusb/%d/%s", quickusb->board,
-					    name ) ) != 0 )
-			return rc;
-		quickusb->subdevs |= ( 1 << subdev );
-	}
-
-	return 0;
-}
+static struct usb_class_driver quickusb_class = {
+	.name		= "usb/quickusb%d",
+	.fops		= &quickusb_fops,
+	.mode		= ( S_IFCHR | S_IRUSR | S_IWUSR |
+			    S_IRGRP | S_IWGRP | S_IROTH ),
+	.minor_base	= QUICKUSB_MINOR_BASE,
+};
 
 static int quickusb_probe ( struct usb_interface *interface,
 			    const struct usb_device_id *id ) {
-	struct usb_device *usbdev = interface_to_usbdev ( interface );
 	struct quickusb_device *quickusb = NULL;
-	struct quickusb_device *quickusb_in_list;
-	unsigned int board = 0;
 	int rc = 0;
 
 	down ( &quickusb_lock );
@@ -166,32 +158,26 @@ static int quickusb_probe ( struct usb_interface *interface,
 		goto err;
 	}
 	memset ( quickusb, 0, sizeof ( *quickusb ) );
-	quickusb->usbdev = usb_get_dev ( usbdev );
-	INIT_LIST_HEAD ( &quickusb->list );
+	kref_init ( &quickusb->kref );
+	quickusb->usbdev = usb_get_dev ( interface_to_usbdev ( interface ) );
+	quickusb->interface = interface;
 
-	/* Obtain a free board index and link into list */
-	list_for_each_entry ( quickusb_in_list, &quickusb_list, list ) {
-		if ( quickusb_in_list->board != board )
-			break;
-		board++;
-	}
-	quickusb->board = board;
-	list_add_tail ( &quickusb->list, &quickusb_in_list->list );
-	
-	/* Create devices */
-	if ( ( rc = quickusb_create_devices ( quickusb ) ) != 0 )
-		goto err;
-
-	/* Record private data */
+	/* Record driver private data */
 	usb_set_intfdata ( interface, quickusb );
+
+	/* Register device */
+	if ( ( rc = usb_register_dev ( interface, &quickusb_class ) ) != 0 ) {
+		printk ( KERN_ERR "quickusb unable to register device\n" );
+		goto err;
+	}
+
+	printk ( KERN_INFO "quickusb %d connected\n", interface->minor ); 
 	goto out;
 
  err:
-	if ( quickusb ) {
-		quickusb_destroy_devices ( quickusb );
-		list_del ( &quickusb->list );
-		kfree ( quickusb );
-	}
+	usb_set_intfdata ( interface, NULL );
+	if ( quickusb )
+		kref_put ( &quickusb->kref, quickusb_delete );
  out:
 	up ( &quickusb_lock );
 	return rc;
@@ -199,13 +185,16 @@ static int quickusb_probe ( struct usb_interface *interface,
 
 static void quickusb_disconnect ( struct usb_interface *interface ) {
 	struct quickusb_device *quickusb = usb_get_intfdata ( interface );
+	unsigned int minor = interface->minor;
 
 	down ( &quickusb_lock );
-	quickusb_destroy_devices ( quickusb );
-	list_del ( &quickusb->list );
 	usb_set_intfdata ( interface, NULL );
-	kfree ( quickusb );
+	usb_deregister_dev ( interface, &quickusb_class );
 	up ( &quickusb_lock );
+
+	kref_put ( &quickusb->kref, quickusb_delete );
+
+	printk ( KERN_INFO "quickusb %d disconnected\n", minor );
 }
 
 static struct usb_device_id quickusb_ids[] = {
@@ -224,31 +213,14 @@ static struct usb_driver quickusb_driver = {
 static int quickusb_init ( void ) {
 	int rc;
 
-	/* Register major char device */
-	if ( ( rc = register_chrdev ( dev_major, "quickusb",
-				      &quickusb_fops ) ) < 0 )
-		goto err_chrdev;
-	if ( ! dev_major ) {
-		dev_major = rc;
-		printk ( KERN_INFO "quickusb using major device %d\n",
-			 dev_major );
-	}
-
-	/* Register USB driver */
 	if ( ( rc = usb_register ( &quickusb_driver ) ) != 0 )
-		goto err_usb;
+		return rc;
 
 	return 0;
-
- err_usb:
-	unregister_chrdev ( dev_major, "quickusb" );
- err_chrdev:
-	return rc;
 }
 
 static void quickusb_exit ( void ) {
 	usb_deregister ( &quickusb_driver );
-	unregister_chrdev ( dev_major, "quickusb" );
 }
 
 module_init ( quickusb_init );
@@ -261,6 +233,3 @@ MODULE_DEVICE_TABLE ( usb, quickusb_ids );
 
 module_param ( debug, bool, S_IRUGO | S_IWUSR );
 MODULE_PARM_DESC ( debug, "Enable debugging" );
-
-module_param ( dev_major, uint, S_IRUGO | S_IWUSR );
-MODULE_PARM_DESC ( dev_major, "Major device number" );
