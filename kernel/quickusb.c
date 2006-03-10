@@ -47,31 +47,27 @@ static void quickusb_delete ( struct kref *kref ) {
 	kfree ( quickusb );
 }
 
-static int quickusb_gppio_read ( struct file *file, char __user *user_data,
-				 size_t len, loff_t *ppos ) {
+static ssize_t quickusb_gppio_read ( struct file *file, char __user *user_data,
+				     size_t len, loff_t *ppos ) {
 	struct quickusb_device *quickusb = file->private_data;
 	struct usb_device *usbdev = quickusb->usbdev;
 	unsigned char data[QUICKUSB_MAX_DATA_LEN];
-	unsigned int frag_len;
-	int rc = 0;
+	int rc;
 
-	while ( len ) {
-		frag_len = ( len < sizeof ( data ) ) ? len : sizeof ( data );
-		if ( ( rc = usb_control_msg ( usbdev,
-					      usb_sndctrlpipe ( usbdev, 0 ),
-					      QUICKUSB_BREQUEST,
-					      QUICKUSB_BREQUESTTYPE_WRITE,
-					      0, 1, data, frag_len,
-					      QUICKUSB_TIMEOUT ) ) != 0 )
-			goto out;
-		if ( ( rc = copy_to_user ( user_data, data, frag_len ) ) != 0 )
-			goto out;
-		len -= frag_len;
-		user_data += frag_len;
-	}
+	if ( len > sizeof ( data ) )
+		len = sizeof ( data );
 
- out:
-	return rc;
+	if ( ( rc = usb_control_msg ( usbdev, usb_rcvctrlpipe ( usbdev, 0 ),
+				      QUICKUSB_BREQUEST,
+				      QUICKUSB_BREQUESTTYPE_READ, 0, 1, data,
+				      len, QUICKUSB_TIMEOUT ) ) < 0 )
+		return rc;
+
+	if ( ( rc = copy_to_user ( user_data, data, len ) ) != 0 )
+		return rc;
+
+	*ppos += len;
+	return len;
 }
 
 static ssize_t quickusb_gppio_write ( struct file *file,
@@ -80,27 +76,22 @@ static ssize_t quickusb_gppio_write ( struct file *file,
 	struct quickusb_device *quickusb = file->private_data;
 	struct usb_device *usbdev = quickusb->usbdev;
 	unsigned char data[QUICKUSB_MAX_DATA_LEN];
-	unsigned int frag_len;
-	int rc = 0;
+	int rc;
 
-	while ( len ) {
-		frag_len = ( len < sizeof ( data ) ) ? len : sizeof ( data );
-		if ( ( rc = copy_from_user ( data, user_data,
-					     frag_len ) ) != 0 )
-			goto out;
-		if ( ( rc = usb_control_msg ( usbdev,
-					      usb_sndctrlpipe ( usbdev, 0 ),
-					      QUICKUSB_BREQUEST,
-					      QUICKUSB_BREQUESTTYPE_WRITE,
-					      0, 1, data, frag_len,
-					      QUICKUSB_TIMEOUT ) ) != 0 )
-			goto out;
-		len -= frag_len;
-		user_data += frag_len;
-	}
+	if ( len > sizeof ( data ) )
+		len = sizeof ( data );
 
- out:
-	return rc;
+	if ( ( rc = copy_from_user ( data, user_data, len ) ) != 0 )
+		return rc;
+
+	if ( ( rc = usb_control_msg ( usbdev, usb_sndctrlpipe ( usbdev, 0 ),
+				      QUICKUSB_BREQUEST,
+				      QUICKUSB_BREQUESTTYPE_WRITE, 0, 1, data,
+				      len, QUICKUSB_TIMEOUT ) ) < 0 )
+		return rc;
+
+	*ppos += len;
+	return len;
 }
 
 static int quickusb_open ( struct inode *inode, struct file *file ) {
