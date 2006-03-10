@@ -22,7 +22,7 @@ obj-$(CONFIG_QUICKUSB) += quickusb.o
 all :
 	$(MAKE) -C $(KSRCDIR) M=$(PWD) modules
 
-clean : clean-doc
+clean :
 	rm -f *.o *.s *.ko *.mod.c
 	$(MAKE) -C $(KSRCDIR) M=$(PWD) clean
 
@@ -46,7 +46,7 @@ all : quickusb.o
 %.s : %.c *.h
 	$(CC) $(CFLAGS) $(CFLAGS_2_4) $(EXTRA_CFLAGS) -S -c -o $@ $<
 
-clean : clean-doc
+clean :
 	rm -f *.o *.s
 
 endif
