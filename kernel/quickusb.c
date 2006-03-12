@@ -279,7 +279,7 @@ static int quickusb_register_devices ( struct quickusb_device *quickusb ) {
 		if ( ( rc = quickusb_register_subdev ( quickusb, subdev_idx++,
 						       &quickusb_gppio_fops,
 						       gppio,
-						       "quickusb%d_gppio_%c",
+						       "qu%dg%c",
 						       quickusb->board,
 						       gppio_char ) ) != 0 )
 			return rc;
