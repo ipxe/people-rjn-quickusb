@@ -80,16 +80,22 @@ static int dev_major = 0;
 
 static int quickusb_gppio_open ( struct inode *inode, struct file *file ) {
 	struct quickusb_gppio *gppio = file->private_data;
-	struct usb_device *usb = gppio->quickusb->usb;
 	unsigned int fmode_rw;
+	int rc;
 
 	fmode_rw = ( file->f_mode & ( FMODE_READ | FMODE_WRITE ) );
 	switch ( fmode_rw ) {
 	case FMODE_READ:
-		quickusb_write_port_dir ( usb, gppio->port, 0 );
+		if ( ( rc = quickusb_write_port_dir ( gppio->quickusb->usb,
+						      gppio->port,
+						      0x00 ) ) != 0 )
+			return rc;
 		break;
 	case FMODE_WRITE:
-		quickusb_write_port_dir ( usb, gppio->port, 0xff );
+		if ( ( rc = quickusb_write_port_dir ( gppio->quickusb->usb,
+						      gppio->port,
+						      0xff ) ) != 0 )
+			return rc;
 		break;
 	default:
 		/* Do not set port direction; opener must use ioctl to
@@ -104,14 +110,13 @@ static int quickusb_gppio_open ( struct inode *inode, struct file *file ) {
 static ssize_t quickusb_gppio_read ( struct file *file, char __user *user_data,
 				     size_t len, loff_t *ppos ) {
 	struct quickusb_gppio *gppio = file->private_data;
-	struct usb_device *usb = gppio->quickusb->usb;
 	unsigned char data[QUICKUSB_MAX_DATA_LEN];
 	int rc;
 
 	if ( len > sizeof ( data ) )
 		len = sizeof ( data );
 
-	if ( ( rc = quickusb_read_port ( usb, gppio->port,
+	if ( ( rc = quickusb_read_port ( gppio->quickusb->usb, gppio->port,
 					 data, &len ) ) != 0 )
 		return rc;
 
@@ -126,7 +131,6 @@ static ssize_t quickusb_gppio_write ( struct file *file,
 				      const char __user *user_data,
 				      size_t len, loff_t *ppos ) {
 	struct quickusb_gppio *gppio = file->private_data;
-	struct usb_device *usb = gppio->quickusb->usb;
 	unsigned char data[QUICKUSB_MAX_DATA_LEN];
 	int rc;
 
@@ -136,12 +140,50 @@ static ssize_t quickusb_gppio_write ( struct file *file,
 	if ( ( rc = copy_from_user ( data, user_data, len ) ) != 0 )
 		return rc;
 
-	if ( ( rc = quickusb_write_port ( usb, gppio->port,
+	if ( ( rc = quickusb_write_port ( gppio->quickusb->usb, gppio->port,
 					  data, &len ) ) != 0 )
 		return rc;
 
 	*ppos += len;
 	return len;
+}
+
+static int quickusb_gppio_ioctl ( struct inode *inode, struct file *file,
+				  unsigned int cmd, unsigned long arg ) {
+	struct quickusb_gppio *gppio = file->private_data;
+	void __user *user_data = ( void __user * ) arg;
+	quickusb_gppio_ioctl_data_t data;
+	unsigned char outputs;
+	int rc;
+
+	if ( ( rc = copy_from_user ( &data, user_data, sizeof (data) ) ) != 0 )
+		return rc;
+
+	switch ( cmd ) {
+	case QUICKUSB_IOC_GPPIO_GET_OUTPUTS:
+		if ( ( rc = quickusb_read_port_dir ( gppio->quickusb->usb,
+						     gppio->port,
+						     &outputs ) ) != 0 )
+			return rc;
+		data = outputs;
+		printk ( "getting outputs as %x\n", outputs );
+		break;
+	case QUICKUSB_IOC_GPPIO_SET_OUTPUTS:
+		outputs = data;
+		printk ( "setting outputs to %x\n", outputs );
+		if ( ( rc = quickusb_write_port_dir ( gppio->quickusb->usb,
+						      gppio->port,
+						      outputs ) ) != 0 )
+			return rc;
+		break;
+	default:
+		return -ENOTTY;
+	}
+
+	if ( ( rc = copy_to_user ( user_data, &data, sizeof ( data ) ) ) != 0 )
+		return rc;
+
+	return 0;
 }
 
 static int quickusb_gppio_release ( struct inode *inode, struct file *file ) {
@@ -156,6 +198,7 @@ static struct file_operations quickusb_gppio_fops = {
 	.open		= quickusb_gppio_open,
 	.read		= quickusb_gppio_read,
 	.write		= quickusb_gppio_write,
+	.ioctl		= quickusb_gppio_ioctl,
 	.release	= quickusb_gppio_release,
 };
 

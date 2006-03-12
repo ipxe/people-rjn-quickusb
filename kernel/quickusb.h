@@ -1,6 +1,10 @@
 #ifndef QUICKUSB_H
 #define QUICKUSB_H
 
+#ifdef __KERNEL__
+
+#include <linux/ioctl.h>
+
 #define QUICKUSB_BREQUEST 0xb3
 #define QUICKUSB_BREQUESTTYPE_READ 0xc0
 #define QUICKUSB_BREQUESTTYPE_WRITE 0x40
@@ -29,7 +33,7 @@ static inline int quickusb_read_port_dir ( struct usb_device *usb,
 				 QUICKUSB_BREQUEST,
 				 QUICKUSB_BREQUESTTYPE_READ,
 				 address, QUICKUSB_WINDEX_GPPIO_DIR,
-				 &outputs, sizeof ( outputs ),
+				 outputs, sizeof ( *outputs ),
 				 QUICKUSB_TIMEOUT );
 	if ( ret > 0 ) {
 		ret = 0;
@@ -124,5 +128,20 @@ static inline int quickusb_write_port ( struct usb_device *usb,
 
 	return ret;
 }
+
+#endif /* __KERNEL__ */
+
+/****************************************************************************
+ *
+ * ioctls
+ *
+ */
+
+typedef uint32_t quickusb_gppio_ioctl_data_t;
+
+#define QUICKUSB_IOC_GPPIO_GET_OUTPUTS \
+	_IOR ( 'Q', 0x00, quickusb_gppio_ioctl_data_t )
+#define QUICKUSB_IOC_GPPIO_SET_OUTPUTS \
+	_IOW ( 'Q', 0x01, quickusb_gppio_ioctl_data_t )
 
 #endif /* QUICKUSB_H */
