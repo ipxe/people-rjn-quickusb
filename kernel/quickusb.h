@@ -8,7 +8,34 @@
 #define QUICKUSB_TIMEOUT ( 1 * HZ )
 
 /**
- * QuickUsbReadPort - read data from GPPIO port
+ * quickusb_write_port_dir
+ *
+ * @usb: USB device
+ * @address: Port number
+ * @outputs: Output bit mask
+ *
+ * Returns 0 for success, or negative error number
+ */
+static inline int quickusb_write_port_dir ( struct usb_device *usb,
+					    unsigned int address,
+					    unsigned char outputs ) {
+	int ret;
+
+	ret =  usb_control_msg ( usb, usb_sndctrlpipe ( usb, 0 ),
+				 QUICKUSB_BREQUEST,
+				 QUICKUSB_BREQUESTTYPE_WRITE, 0, 0,
+				 &outputs, sizeof ( outputs ),
+				 QUICKUSB_TIMEOUT );
+
+	if ( ret > 0 ) {
+		ret = 0;
+	}
+
+	return ret;
+}
+
+/**
+ * quickusb_read_port - read data from GPPIO port
  *
  * @usb: USB device
  * @address: Port number
@@ -18,7 +45,7 @@
  * Returns 0 for success, or negative error number
  */
 static inline int quickusb_read_port ( struct usb_device *usb,
-				       unsigned char address,
+				       unsigned int address,
 				       unsigned char *data,
 				       size_t *len ) {
 	int ret;
@@ -36,7 +63,7 @@ static inline int quickusb_read_port ( struct usb_device *usb,
 }
 
 /**
- * QuickUsbWritePort - write data to GPPIO port
+ * quickusb_write_port - write data to GPPIO port
  *
  * @usb: USB device
  * @address: Port number
@@ -46,7 +73,7 @@ static inline int quickusb_read_port ( struct usb_device *usb,
  * Returns 0 for success, or negative error number
  */
 static inline int quickusb_write_port ( struct usb_device *usb,
-					unsigned char address,
+					unsigned int address,
 					unsigned char *data,
 					size_t *len ) {
 	int ret;

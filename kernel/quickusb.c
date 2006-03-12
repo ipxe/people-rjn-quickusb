@@ -78,6 +78,29 @@ static int dev_major = 0;
  *
  */
 
+static int quickusb_gppio_open ( struct inode *inode, struct file *file ) {
+	struct quickusb_gppio *gppio = file->private_data;
+	struct usb_device *usb = gppio->quickusb->usb;
+	unsigned int fmode_rw;
+
+	fmode_rw = ( file->f_mode & ( FMODE_READ | FMODE_WRITE ) );
+	switch ( fmode_rw ) {
+	case FMODE_READ:
+		quickusb_write_port_dir ( usb, gppio->port, 0 );
+		break;
+	case FMODE_WRITE:
+		quickusb_write_port_dir ( usb, gppio->port, 0xff );
+		break;
+	default:
+		/* Do not set port direction; opener must use ioctl to
+		 * set individual bits
+		 */
+		break;
+	}
+
+	return 0;
+}
+
 static ssize_t quickusb_gppio_read ( struct file *file, char __user *user_data,
 				     size_t len, loff_t *ppos ) {
 	struct quickusb_gppio *gppio = file->private_data;
@@ -130,6 +153,7 @@ static int quickusb_gppio_release ( struct inode *inode, struct file *file ) {
 
 static struct file_operations quickusb_gppio_fops = {
 	.owner		= THIS_MODULE,
+	.open		= quickusb_gppio_open,
 	.read		= quickusb_gppio_read,
 	.write		= quickusb_gppio_write,
 	.release	= quickusb_gppio_release,
