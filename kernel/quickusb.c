@@ -32,9 +32,6 @@
 
 #define QUICKUSB_MAX_GPPIO 5
 
-static int debug = 0;
-static int dev_major = 0;
-
 struct quickusb_gppio {
 	struct quickusb_device *quickusb;
 	unsigned int port;
@@ -43,7 +40,9 @@ struct quickusb_gppio {
 struct quickusb_subdev {
 	struct file_operations *f_op;
 	void *private_data;
+	dev_t dev;
 	unsigned char name[32];
+	struct class_device *class_dev;
 };
 
 struct quickusb_device {
@@ -67,6 +66,11 @@ static void quickusb_delete ( struct kref *kref ) {
 static LIST_HEAD ( quickusb_list );
 
 static DECLARE_MUTEX ( quickusb_lock );
+
+static struct class_simple *quickusb_class;
+
+static int debug = 0;
+static int dev_major = 0;
 
 /****************************************************************************
  *
@@ -195,14 +199,18 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 				      void *private_data,
 				      const char *subdev_fmt, ... ) {
 	struct quickusb_subdev *subdev = &quickusb->subdev[subdev_idx];
+	struct device *device = &quickusb->interface->dev;
 	unsigned int dev_minor;
-	dev_t dev;
 	va_list ap;
 	int rc;
 
 	/* Construct device number */
 	dev_minor = QUICKUSB_MINOR ( quickusb->board, subdev_idx );
-	dev = MKDEV ( dev_major, dev_minor );
+	subdev->dev = MKDEV ( dev_major, dev_minor );
+
+	/* Fill subdev structure */
+	subdev->f_op = f_op;
+	subdev->private_data = private_data;
 
 	/* Construct device name */
 	va_start ( ap, subdev_fmt );
@@ -210,17 +218,28 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 	va_end ( ap );
 
 	/* Create devfs device */
-	if ( ( rc = devfs_mk_cdev ( dev,
+	if ( ( rc = devfs_mk_cdev ( subdev->dev,
 				    ( S_IFCHR | S_IRUSR | S_IWUSR |
 				      S_IRGRP | S_IWGRP ),
 				    subdev->name ) ) != 0 )
-		return rc;
+		goto err_devfs;
 
-	/* Fill subdev structure */
-	subdev->f_op = f_op;
-	subdev->private_data = private_data;
+	/* Create class device */
+	subdev->class_dev = class_simple_device_add ( quickusb_class,
+						      subdev->dev, device,
+						      subdev->name );
+	if ( IS_ERR ( subdev->class_dev ) ) {
+		rc = PTR_ERR ( subdev->class_dev );
+		goto err_class;
+	}
 
 	return 0;
+
+ err_class:
+	devfs_remove ( subdev->name );
+ err_devfs:
+	memset ( subdev, 0, sizeof ( *subdev ) );
+	return rc;
 }
 				      
 static void quickusb_deregister_subdev ( struct quickusb_device *quickusb,
@@ -230,11 +249,14 @@ static void quickusb_deregister_subdev ( struct quickusb_device *quickusb,
 	if ( ! subdev->f_op )
 		return;
 
-	/* Clear subdev structure */
-	memset ( subdev, 0, sizeof ( *subdev ) );
-	
+	/* Remove class device */
+	class_simple_device_remove ( subdev->dev );
+
 	/* Remove devfs device */
 	devfs_remove ( subdev->name );
+
+	/* Clear subdev structure */
+	memset ( subdev, 0, sizeof ( *subdev ) );
 }
 
 /****************************************************************************
@@ -257,7 +279,7 @@ static int quickusb_register_devices ( struct quickusb_device *quickusb ) {
 		if ( ( rc = quickusb_register_subdev ( quickusb, subdev_idx++,
 						       &quickusb_gppio_fops,
 						       gppio,
-						       "quickusb%d/gppio_%c",
+						       "quickusb%d_gppio_%c",
 						       quickusb->board,
 						       gppio_char ) ) != 0 )
 			return rc;
@@ -378,19 +400,34 @@ static int quickusb_init ( void ) {
 
 	/* Register major char device */
 	if ( ( rc = register_chrdev ( dev_major, "quickusb",
-				      &quickusb_fops ) ) < 0 )
+				      &quickusb_fops ) ) < 0 ) {
+		printk ( KERN_ERR "quickusb could not register char device: "
+			 "error %d\n", rc );
 		goto err_chrdev;
+	}
 	if ( ! dev_major ) {
 		dev_major = rc;
 		printk ( KERN_INFO "quickusb using major device %d\n",
 			 dev_major );
 	}
+	
+	/* Create device class */
+	quickusb_class = class_simple_create ( THIS_MODULE, "quickusb" );
+	if ( IS_ERR ( quickusb_class ) ) {
+		rc = PTR_ERR ( quickusb_class );
+		printk ( KERN_ERR "quickusb could not create device class: "
+			 "error %d\n", rc );
+		goto err_class;
+	}
+
 	if ( ( rc = usb_register ( &quickusb_driver ) ) != 0 )
 		goto err_usb;
 
 	return 0;
 
  err_usb:
+	class_simple_destroy ( quickusb_class );
+ err_class:
 	unregister_chrdev ( dev_major, "quickusb" );
  err_chrdev:
 	return rc;
@@ -398,6 +435,7 @@ static int quickusb_init ( void ) {
 
 static void quickusb_exit ( void ) {
 	usb_deregister ( &quickusb_driver );
+	class_simple_destroy ( quickusb_class );
 	unregister_chrdev ( dev_major, "quickusb" );
 }
 
