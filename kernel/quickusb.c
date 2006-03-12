@@ -166,11 +166,9 @@ static int quickusb_gppio_ioctl ( struct inode *inode, struct file *file,
 						     &outputs ) ) != 0 )
 			return rc;
 		data = outputs;
-		printk ( "getting outputs as %x\n", outputs );
 		break;
 	case QUICKUSB_IOC_GPPIO_SET_OUTPUTS:
 		outputs = data;
-		printk ( "setting outputs to %x\n", outputs );
 		if ( ( rc = quickusb_write_port_dir ( gppio->quickusb->usb,
 						      gppio->port,
 						      outputs ) ) != 0 )
