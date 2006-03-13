@@ -21,7 +21,7 @@
 #define QUICKUSB_VENDOR_ID 0x0fbb
 #define QUICKUSB_DEVICE_ID 0x0001
 
-#define QUICKUSB_MAX_SUBDEVS 8
+#define QUICKUSB_MAX_SUBDEVS 16
 #define QUICKUSB_SUBDEV_MASK ( QUICKUSB_MAX_SUBDEVS - 1 )
 #define QUICKUSB_MINOR_BOARD( dev_minor ) \
 	( (dev_minor) / QUICKUSB_MAX_SUBDEVS )
@@ -35,6 +35,10 @@
 struct quickusb_gppio {
 	struct quickusb_device *quickusb;
 	unsigned int port;
+};
+
+struct quickusb_hspio {
+	struct quickusb_device *quickusb;
 };
 
 struct quickusb_subdev {
@@ -52,6 +56,7 @@ struct quickusb_device {
 	struct list_head list;
 	unsigned int board;
 	struct quickusb_gppio gppio[QUICKUSB_MAX_GPPIO];
+	struct quickusb_hspio hspio;
 	struct quickusb_subdev subdev[QUICKUSB_MAX_SUBDEVS];
 };
 
@@ -198,6 +203,68 @@ static struct file_operations quickusb_gppio_fops = {
 	.write		= quickusb_gppio_write,
 	.ioctl		= quickusb_gppio_ioctl,
 	.release	= quickusb_gppio_release,
+};
+
+/****************************************************************************
+ *
+ * HSPIO char device operations
+ *
+ */
+
+static ssize_t quickusb_hspio_read_command ( struct file *file,
+					     char __user *user_data,
+					     size_t len, loff_t *ppos ) {
+	struct quickusb_hspio *hspio = file->private_data;
+	unsigned char data[QUICKUSB_MAX_DATA_LEN];
+	int rc;
+
+	if ( len > sizeof ( data ) )
+		len = sizeof ( data );
+
+	if ( ( rc = quickusb_read_command ( hspio->quickusb->usb, *ppos,
+					    data, len ) ) != 0 )
+		return rc;
+
+	if ( ( rc = copy_to_user ( user_data, data, len ) ) != 0 )
+		return rc;
+
+	*ppos += len;
+	return len;
+}
+
+static ssize_t quickusb_hspio_write_command ( struct file *file,
+					      const char __user *user_data,
+					      size_t len, loff_t *ppos ) {
+	struct quickusb_hspio *hspio = file->private_data;
+	unsigned char data[QUICKUSB_MAX_DATA_LEN];
+	int rc;
+
+	if ( len > sizeof ( data ) )
+		len = sizeof ( data );
+
+	if ( ( rc = copy_from_user ( data, user_data, len ) ) != 0 )
+		return rc;
+
+	if ( ( rc = quickusb_write_command ( hspio->quickusb->usb, *ppos,
+					     data, len ) ) != 0 )
+		return rc;
+
+	*ppos += len;
+	return len;
+}
+
+static int quickusb_hspio_release ( struct inode *inode, struct file *file ) {
+	struct quickusb_hspio *hspio = file->private_data;
+	
+	kref_put ( &hspio->quickusb->kref, quickusb_delete );
+	return 0;
+}
+
+static struct file_operations quickusb_hspio_command_fops = {
+	.owner		= THIS_MODULE,
+	.read		= quickusb_hspio_read_command,
+	.write		= quickusb_hspio_write_command,
+	.release	= quickusb_hspio_release,
 };
 
 /****************************************************************************
@@ -349,6 +416,14 @@ static int quickusb_register_devices ( struct quickusb_device *quickusb ) {
 						       gppio_char ) ) != 0 )
 			return rc;
 	}
+
+	/* Register HSPIO port in all its variants */
+	if ( ( rc = quickusb_register_subdev ( quickusb, subdev_idx++,
+					       &quickusb_hspio_command_fops,
+					       &quickusb->hspio,
+					       "qu%dhc",
+					       quickusb->board ) ) != 0 )
+		return rc;
 	
 	return 0;
 }
@@ -393,6 +468,7 @@ static int quickusb_probe ( struct usb_interface *interface,
 		quickusb->gppio[i].quickusb = quickusb;
 		quickusb->gppio[i].port = i;
 	}
+	quickusb->hspio.quickusb = quickusb;
 	
 	/* Obtain a free board board and link into list */
 	list_for_each_entry ( pre_existing_quickusb, &quickusb_list, list ) {
