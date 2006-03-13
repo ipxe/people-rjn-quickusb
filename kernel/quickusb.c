@@ -117,7 +117,7 @@ static ssize_t quickusb_gppio_read ( struct file *file, char __user *user_data,
 		len = sizeof ( data );
 
 	if ( ( rc = quickusb_read_port ( gppio->quickusb->usb, gppio->port,
-					 data, &len ) ) != 0 )
+					 data, len ) ) != 0 )
 		return rc;
 
 	if ( ( rc = copy_to_user ( user_data, data, len ) ) != 0 )
@@ -141,7 +141,7 @@ static ssize_t quickusb_gppio_write ( struct file *file,
 		return rc;
 
 	if ( ( rc = quickusb_write_port ( gppio->quickusb->usb, gppio->port,
-					  data, &len ) ) != 0 )
+					  data, len ) ) != 0 )
 		return rc;
 
 	*ppos += len;

@@ -5,10 +5,13 @@
 
 #include <linux/ioctl.h>
 
-#define QUICKUSB_BREQUEST_SETTING 0xb0
-#define QUICKUSB_BREQUEST_GPPIO 0xb3
-#define QUICKUSB_BREQUESTTYPE_READ 0xc0
-#define QUICKUSB_BREQUESTTYPE_WRITE 0x40
+#define QUICKUSB_BREQUEST_SETTING	0xb0
+#define QUICKUSB_BREQUEST_HSPIO_COMMAND	0xb2
+#define QUICKUSB_BREQUEST_GPPIO		0xb3
+
+#define QUICKUSB_BREQUESTTYPE_READ	0xc0
+#define QUICKUSB_BREQUESTTYPE_WRITE	0x40
+
 #define QUICKUSB_MAX_DATA_LEN 64
 
 #define QUICKUSB_WINDEX_GPPIO_DIR 0
@@ -28,19 +31,18 @@
 static inline int quickusb_read_setting ( struct usb_device *usb,
 					  unsigned int address,
 					  uint16_t *setting ) {
+	uint16_t setting_le;
 	int ret;
 
 	ret =  usb_control_msg ( usb, usb_rcvctrlpipe ( usb, 0 ),
 				 QUICKUSB_BREQUEST_SETTING,
 				 QUICKUSB_BREQUESTTYPE_READ,
 				 0, address,
-				 setting, sizeof ( *setting ),
+				 &setting_le, sizeof ( setting_le ),
 				 QUICKUSB_TIMEOUT );
-	if ( ret > 0 ) {
-		ret = 0;
-	}
 
-	return ret;
+	*setting = le16_to_cpu ( setting_le );
+	return ( ret > 0 ) ? 0 : ret;
 }
 
 /**
@@ -55,19 +57,65 @@ static inline int quickusb_read_setting ( struct usb_device *usb,
 static inline int quickusb_write_setting ( struct usb_device *usb,
 					   unsigned int address,
 					   uint16_t setting ) {
+	uint16_t setting_le = cpu_to_le16 ( setting );
 	int ret;
 
 	ret =  usb_control_msg ( usb, usb_sndctrlpipe ( usb, 0 ),
 				 QUICKUSB_BREQUEST_SETTING,
 				 QUICKUSB_BREQUESTTYPE_WRITE,
 				 0, address,
-				 &setting, sizeof ( setting ),
+				 &setting_le, sizeof ( setting_le ),
 				 QUICKUSB_TIMEOUT );
-	if ( ret > 0 ) {
-		ret = 0;
-	}
 
-	return ret;
+	return ( ret > 0 ) ? 0 : ret;
+}
+
+/**
+ * quickusb_read_command - read HSPIO port with a command cycle
+ *
+ * @usb: USB device
+ * @address: Starting address
+ * @data: Data buffer
+ * @len: Length of data to read (max QUICKUSB_MAX_DATA_LEN)
+ *
+ * Returns 0 for success, or negative error number
+ */
+static inline int quickusb_read_command ( struct usb_device *usb,
+					  uint16_t address,
+					  void *data, size_t len ) {
+	int ret;
+	
+	ret =  usb_control_msg ( usb, usb_rcvctrlpipe ( usb, 0 ),
+				 QUICKUSB_BREQUEST_HSPIO_COMMAND,
+				 QUICKUSB_BREQUESTTYPE_READ,
+				 len, address,
+				 data, len, QUICKUSB_TIMEOUT );
+
+	return ( ret > 0 ) ? 0 : ret;
+}
+
+/**
+ * quickusb_write_command - write HSPIO port with a command cycle
+ *
+ * @usb: USB device
+ * @address: Starting address
+ * @data: Data to be written
+ * @len: Length of data to write (max QUICKUSB_MAX_DATA_LEN)
+ *
+ * Returns 0 for success, or negative error number
+ */
+static inline int quickusb_write_command ( struct usb_device *usb,
+					   uint16_t address,
+					   void *data, size_t len ) {
+	int ret;
+	
+	ret =  usb_control_msg ( usb, usb_sndctrlpipe ( usb, 0 ),
+				 QUICKUSB_BREQUEST_HSPIO_COMMAND,
+				 QUICKUSB_BREQUESTTYPE_WRITE,
+				 len, address,
+				 data, len, QUICKUSB_TIMEOUT );
+
+	return ( ret > 0 ) ? 0 : ret;
 }
 
 /**
@@ -90,11 +138,8 @@ static inline int quickusb_read_port_dir ( struct usb_device *usb,
 				 address, QUICKUSB_WINDEX_GPPIO_DIR,
 				 outputs, sizeof ( *outputs ),
 				 QUICKUSB_TIMEOUT );
-	if ( ret > 0 ) {
-		ret = 0;
-	}
 
-	return ret;
+	return ( ret > 0 ) ? 0 : ret;
 }
 
 /**
@@ -137,20 +182,16 @@ static inline int quickusb_write_port_dir ( struct usb_device *usb,
  */
 static inline int quickusb_read_port ( struct usb_device *usb,
 				       unsigned int address,
-				       void *data, size_t *len ) {
+				       void *data, size_t len ) {
 	int ret;
 	
 	ret =  usb_control_msg ( usb, usb_rcvctrlpipe ( usb, 0 ),
 				 QUICKUSB_BREQUEST_GPPIO,
 				 QUICKUSB_BREQUESTTYPE_READ,
 				 address, QUICKUSB_WINDEX_GPPIO_DATA,
-				 data, *len, QUICKUSB_TIMEOUT );
-	if ( ret > 0 ) {
-		*len = ret;
-		ret = 0;
-	}
+				 data, len, QUICKUSB_TIMEOUT );
 
-	return ret;
+	return ( ret > 0 ) ? 0 : ret;
 }
 
 /**
@@ -165,21 +206,16 @@ static inline int quickusb_read_port ( struct usb_device *usb,
  */
 static inline int quickusb_write_port ( struct usb_device *usb,
 					unsigned int address,
-					void *data, size_t *len ) {
+					void *data, size_t len ) {
 	int ret;
 
 	ret =  usb_control_msg ( usb, usb_sndctrlpipe ( usb, 0 ),
 				 QUICKUSB_BREQUEST_GPPIO,
 				 QUICKUSB_BREQUESTTYPE_WRITE,
 				 address, QUICKUSB_WINDEX_GPPIO_DATA,
-				 data, *len, QUICKUSB_TIMEOUT );
-
-	if ( ret > 0 ) {
-		*len = ret;
-		ret = 0;
-	}
-
-	return ret;
+				 data, len, QUICKUSB_TIMEOUT );
+	
+	return ( ret > 0 ) ? 0 : ret;
 }
 
 #endif /* __KERNEL__ */
