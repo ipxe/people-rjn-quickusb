@@ -13,10 +13,10 @@
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/devfs_fs_kernel.h>
-#include <linux/kref.h>
 #include <linux/usb.h>
 #include <asm/uaccess.h>
 #include "quickusb.h"
+#include "kernel_compat.h"
 
 #define QUICKUSB_VENDOR_ID 0x0fbb
 #define QUICKUSB_DEVICE_ID 0x0001
@@ -350,7 +350,7 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 				      void *private_data,
 				      const char *subdev_fmt, ... ) {
 	struct quickusb_subdev *subdev = &quickusb->subdev[subdev_idx];
-	struct device *device = &quickusb->interface->dev;
+	struct usb_interface *interface = quickusb->interface;
 	unsigned int dev_minor;
 	va_list ap;
 	int rc;
@@ -377,7 +377,8 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 
 	/* Create class device */
 	subdev->class_dev = class_simple_device_add ( quickusb_class,
-						      subdev->dev, device,
+						      subdev->dev,
+						      &interface->dev,
 						      subdev->name );
 	if ( IS_ERR ( subdev->class_dev ) ) {
 		rc = PTR_ERR ( subdev->class_dev );
