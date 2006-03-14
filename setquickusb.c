@@ -13,13 +13,16 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <getopt.h>
+#include <string.h>
+#include <sys/ioctl.h>
 
-/*
-  #include "kernel/quickusb.h"
-*/
+#include "kernel/quickusb.h"
+
+#define UNDEFINED_UL -1UL
 
 /*
  * Options
@@ -33,7 +36,7 @@ struct options
 };
 
 int parseopts ( const int, char **argv, struct options * );
-int check_valid_strtoint ( const char* );
+unsigned long parseint ( const char * );
 void printhelp ();
 
 /*
@@ -43,24 +46,37 @@ void printhelp ();
  *
  */
 int main ( int argc, char* argv[] ) {
-  int last_index;
-  struct options opts = { -1 }; /* initialise options structure */
-  last_index = parseopts(argc,argv,&opts);
+  struct options opts = { UNDEFINED_UL }; /* initialise options structure */
+  int last_index = parseopts(argc,argv,&opts), fd;
+  quickusb_gppio_ioctl_data_t outputs;
 
-  int fd;
-  if ( argv[last_index] != NULL ) 
+  if ( last_index == ( argc - 1 ) )
     fd = open( argv[last_index], O_RDWR );
-  if ( fd == -1 ) {
-    printf( "Could not open device %s: %s\n", argv[last_index], strerror(errno) );
-    exit;
+  else {
+    printf("No device specified!\n");
+    exit(EXIT_FAILURE);
+  }
+  if ( fd < 0 ) {
+    printf( "Error: Could not open device %s: %s\n", argv[last_index], strerror(errno) );
+    exit(EXIT_FAILURE);
   }
 
-  if ( opts.outputs >= 0) {
+  if ( opts.outputs != UNDEFINED_UL ) {
+    outputs = opts.outputs;
+    if ( ioctl(fd,QUICKUSB_IOC_GPPIO_SET_OUTPUTS, &(outputs) ) == 0 ) {}
+    else {
+      printf("Error: %s\n", strerror(errno));
+      exit(EXIT_FAILURE);
+    }
   }
   else {
-    int rc;
-    /*    quickusb_gppio_ioctl_data_t outputs;
-	  rc = ioctl ();*/
+    if ( ioctl(fd,QUICKUSB_IOC_GPPIO_GET_OUTPUTS, &(outputs) ) == 0 ) {
+      printf("Outputs: %#x\n",outputs);
+    }
+    else {
+      printf("Error: %s\n", strerror(errno));
+      exit(EXIT_FAILURE);
+    }
   }
 
   close(fd);
@@ -72,14 +88,14 @@ int main ( int argc, char* argv[] ) {
  * Parse command-line options and return index of last element in
  * argument list that is not an option
  */
-int parseopts ( const int argc, char **argv, struct options *opt ) {
+int parseopts ( const int argc, char **argv, struct options *opts ) {
   int c;
 
   while (1) {
     int option_index = 0;
     static struct option long_options[] = {
-      { "outputs", 1, 0, 0 },
-      { "help", 0, 0, 0 },
+      { "outputs", 1, NULL, 'o' },
+      { "help", 0, NULL, 'h' },
       { 0, 0, 0, 0 }
     };
 
@@ -87,23 +103,40 @@ int parseopts ( const int argc, char **argv, struct options *opt ) {
       break;
 
     switch(c) {
-    case 0:
-      printf("warning: unrecognised option %s\n", long_options[option_index].name);
-      if (optarg)
-	printf("         with arg %s\n", optarg);
-      break;
     case 'o':
+      opts->outputs = parseint(optarg);
       break;
     case 'h':
     case '?':
       printhelp();
       break;
     default:
-      printf("?? getopt returned character code 0x%o\n",c);
+      printf("Warning: unrecognised character code %o\n", c);
+      if (optarg)
+	printf("         with arg %s\n", optarg);
     }
   }
 
   return optind;
+}
+
+unsigned long parseint ( const char *nPtr ) {
+  unsigned long tmp;
+  char *endPtr;
+
+  if ( *nPtr == '\0' ) {
+    printf("Error: No value specified\n");
+    exit(EXIT_FAILURE);
+  }
+
+  tmp = strtoul ( nPtr, &endPtr, 0 );
+
+  if ( *endPtr != '\0' ) {
+    printf("Error: Invalid value \"%s\"\n", nPtr);
+    exit(EXIT_FAILURE);
+  }
+
+  return tmp;
 }
 
 /*
@@ -112,14 +145,4 @@ int parseopts ( const int argc, char **argv, struct options *opt ) {
 void printhelp () {
   printf("Usage: setquickusb [options] device\n");
   exit(EXIT_SUCCESS);
-}
-
-int check_valid_strtoint ( const char *nPtr ) {
-  unsigned long tmp;
-  char **endPtr;
-  tmp = strtoul(nPtr,endPtr,0);
-  if ( endPtr != NULL ) {
-    printf("Value contains invalid characters [%s]\n",endPtr);
-    exit(EXIT_FAILURE);
-  }
 }
