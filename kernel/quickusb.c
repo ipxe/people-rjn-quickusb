@@ -223,6 +223,48 @@ static ssize_t quickusb_hspio_write_command ( struct file *file,
 	return len;
 }
 
+static ssize_t quickusb_hspio_read_data ( struct file *file,
+					  char __user *user_data,
+					  size_t len, loff_t *ppos ) {
+	struct quickusb_hspio *hspio = file->private_data;
+	unsigned char data[QUICKUSB_MAX_BULK_DATA_LEN];
+	int rc;
+
+	if ( len > sizeof ( data ) )
+		len = sizeof ( data );
+
+	if ( ( rc = quickusb_read_data ( hspio->quickusb->usb,
+					 data, len ) ) != 0 )
+		return rc;
+
+	if ( ( rc = copy_to_user ( user_data, data, len ) ) != 0 )
+		return rc;
+
+	*ppos += len;
+	return len;
+}
+
+static ssize_t quickusb_hspio_write_data ( struct file *file,
+					   const char __user *user_data,
+					   size_t len, loff_t *ppos ) {
+	struct quickusb_hspio *hspio = file->private_data;
+	unsigned char data[QUICKUSB_MAX_BULK_DATA_LEN];
+	int rc;
+
+	if ( len > sizeof ( data ) )
+		len = sizeof ( data );
+
+	if ( ( rc = copy_from_user ( data, user_data, len ) ) != 0 )
+		return rc;
+
+	if ( ( rc = quickusb_write_data ( hspio->quickusb->usb,
+					  data, len ) ) != 0 )
+		return rc;
+
+	*ppos += len;
+	return len;
+}
+
 static int quickusb_hspio_release ( struct inode *inode, struct file *file ) {
 	struct quickusb_hspio *hspio = file->private_data;
 	
@@ -234,6 +276,13 @@ static struct file_operations quickusb_hspio_command_fops = {
 	.owner		= THIS_MODULE,
 	.read		= quickusb_hspio_read_command,
 	.write		= quickusb_hspio_write_command,
+	.release	= quickusb_hspio_release,
+};
+
+static struct file_operations quickusb_hspio_data_fops = {
+	.owner		= THIS_MODULE,
+	.read		= quickusb_hspio_read_data,
+	.write		= quickusb_hspio_write_data,
 	.release	= quickusb_hspio_release,
 };
 
@@ -392,6 +441,12 @@ static int quickusb_register_devices ( struct quickusb_device *quickusb ) {
 					       &quickusb_hspio_command_fops,
 					       &quickusb->hspio,
 					       "qu%dhc",
+					       quickusb->board ) ) != 0 )
+		return rc;
+	if ( ( rc = quickusb_register_subdev ( quickusb, subdev_idx++,
+					       &quickusb_hspio_data_fops,
+					       &quickusb->hspio,
+					       "qu%dhd",
 					       quickusb->board ) ) != 0 )
 		return rc;
 	
