@@ -1,0 +1,55 @@
+Index: quickusb.c
+===================================================================
+RCS file: /vault/cvs/mutations/quickusb/kernel/quickusb.c,v
+retrieving revision 1.18
+diff -u -r1.18 quickusb.c
+--- quickusb.c	11 Jun 2006 21:26:39 -0000	1.18
++++ quickusb.c	11 Jun 2006 21:30:16 -0000
+@@ -509,8 +509,16 @@
+  *
+  */
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
+ static int quickusb_probe ( struct usb_interface *interface,
+ 			    const struct usb_device_id *id ) {
++	struct usb_device *usb = interface_to_usbdev ( interface );
++#else
++static void * quickusb_probe ( struct usb_device *usb,
++			       unsigned int intf,
++			       const struct usb_device_id *id ) {
++	struct usb_interface *interface = usb_ifnum_to_if ( usb, intf );
++#endif
+ 	struct quickusb_device *quickusb = NULL;
+ 	struct quickusb_device *pre_existing_quickusb;
+ 	unsigned int board = 0;
+@@ -528,7 +536,7 @@
+ 	memset ( quickusb, 0, sizeof ( *quickusb ) );
+ 	kref_init ( &quickusb->kref );
+ 	INIT_LIST_HEAD ( &quickusb_list );
+-	quickusb->usb = usb_get_dev ( interface_to_usbdev ( interface ) );
++	quickusb->usb = usb_get_dev ( usb );
+ 	quickusb->interface = interface;
+ 	for ( i = 0 ; i < QUICKUSB_MAX_GPPIO ; i++ ) {
+ 		quickusb->gppio[i].quickusb = quickusb;
+@@ -579,11 +587,21 @@
+ 	}
+  out:
+ 	up ( &quickusb_lock );
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
+ 	return rc;
++#else
++	return ( ( rc == 0 ) ? quickusb : ERR_PTR ( rc ) );
++#endif
+ }
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
+ static void quickusb_disconnect ( struct usb_interface *interface ) {
+ 	struct quickusb_device *quickusb = usb_get_intfdata ( interface );
++#else
++static void quickusb_disconnect ( struct usb_device *usb,
++				  void *intf_data ) {
++	struct quickusb_device *quickusb = intf_data;
++#endif
+ 
+ 	printk ( KERN_INFO "quickusb%d disconnected\n", quickusb->board );
+ 
