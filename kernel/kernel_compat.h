@@ -63,11 +63,12 @@ static inline void class_simple_device_remove ( dev_t dev ) {
 	/* Do nothing */
 }
 
-static devfs_handle_t devfs_handle;
 static struct file_operations quickusb_fops;
 
 static inline int devfs_mk_cdev ( dev_t dev, umode_t mode,
 				  const char *name ) {
+	devfs_handle_t devfs_handle;
+
 	devfs_handle = devfs_register ( NULL, name, DEVFS_FL_DEFAULT,
 					MAJOR ( dev ), MINOR ( dev ),
 					mode, &quickusb_fops, NULL );
@@ -75,10 +76,22 @@ static inline int devfs_mk_cdev ( dev_t dev, umode_t mode,
 }
 
 static inline void devfs_remove ( const char *name ) {
+	devfs_handle_t devfs_handle;
+
+	devfs_handle = devfs_get_handle ( NULL, name, 0, 0,
+					  DEVFS_SPECIAL_CHR, 0 );
+	if ( ! devfs_handle ) {
+		printk ( "Aargh: can't find %s to unregister it\n",
+			 name );
+		return;
+	}
+
 	devfs_unregister ( devfs_handle );
 }
 
 #define module_param( name, type, perm ) MODULE_PARM ( name, "i" )
+
+#define usb_set_intfdata(...) do { } while ( 0 )
 
 #endif /* LINUX_VERSION_CODE < KERNEL_VERSION(2,6,0) */
 
