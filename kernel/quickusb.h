@@ -22,9 +22,7 @@
 #define QUICKUSB_WINDEX_GPPIO_DIR	0
 #define QUICKUSB_WINDEX_GPPIO_DATA	1
 
-#define QUICKUSB_FIFOCONFIG		0x03
-#define QUICKUSB_FIFOCONFIG_MASTER	0xf2
-#define QUICKUSB_FIFOCONFIG_SLAVE	0xf3
+#define QUICKUSB_SETTING_GPPIO(port) ( 9 + (port) )
 
 #define QUICKUSB_TIMEOUT ( 1 * HZ )
 
@@ -309,11 +307,13 @@ typedef uint32_t quickusb_gppio_ioctl_data_t;
 	_IOR ( 'Q', 0x00, quickusb_gppio_ioctl_data_t )
 #define QUICKUSB_IOC_GPPIO_SET_OUTPUTS \
 	_IOW ( 'Q', 0x01, quickusb_gppio_ioctl_data_t )
-
-typedef uint32_t quickusb_hspio_ioctl_data_t;
-#define QUICKUSB_IOC_HSPIO_GET_FIFOCONFIG \
-	_IOR ( 'Q', 0x02, quickusb_hspio_ioctl_data_t )
-#define QUICKUSB_IOC_HSPIO_SET_FIFOCONFIG \
-	_IOW ( 'Q', 0x03, quickusb_hspio_ioctl_data_t )
+#define QUICKUSB_IOC_GPPIO_GET_DEFAULT_OUTPUTS \
+	_IOR ( 'Q', 0x02, quickusb_gppio_ioctl_data_t )
+#define QUICKUSB_IOC_GPPIO_SET_DEFAULT_OUTPUTS \
+	_IOW ( 'Q', 0x03, quickusb_gppio_ioctl_data_t )
+#define QUICKUSB_IOC_GPPIO_GET_DEFAULT_LEVELS \
+	_IOR ( 'Q', 0x04, quickusb_gppio_ioctl_data_t )
+#define QUICKUSB_IOC_GPPIO_SET_DEFAULT_LEVELS \
+	_IOW ( 'Q', 0x05, quickusb_gppio_ioctl_data_t )
 
 #endif /* QUICKUSB_H */

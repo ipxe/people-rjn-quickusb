@@ -133,6 +133,8 @@ static int quickusb_gppio_ioctl ( struct inode *inode, struct file *file,
 	void __user *user_data = ( void __user * ) arg;
 	quickusb_gppio_ioctl_data_t data;
 	unsigned char outputs;
+	unsigned int setting_address = QUICKUSB_SETTING_GPPIO ( gppio->port );
+	uint16_t setting;
 	int rc;
 
 	if ( ( rc = copy_from_user ( &data, user_data, sizeof (data) ) ) != 0 )
@@ -151,6 +153,42 @@ static int quickusb_gppio_ioctl ( struct inode *inode, struct file *file,
 		if ( ( rc = quickusb_write_port_dir ( gppio->quickusb->usb,
 						      gppio->port,
 						      outputs ) ) != 0 )
+			return rc;
+		break;
+	case QUICKUSB_IOC_GPPIO_GET_DEFAULT_OUTPUTS:
+		if ( ( rc = quickusb_read_setting ( gppio->quickusb->usb,
+						    setting_address,
+						    &setting ) ) != 0 )
+			return rc;
+		data = ( setting >> 8 );
+		break;
+	case QUICKUSB_IOC_GPPIO_SET_DEFAULT_OUTPUTS:
+		if ( ( rc = quickusb_read_setting ( gppio->quickusb->usb,
+						    setting_address,
+						    &setting ) ) != 0 )
+			return rc;
+		setting = ( ( setting & 0x00ff ) | ( data << 8 ) );
+		if ( ( rc = quickusb_write_setting ( gppio->quickusb->usb,
+						     setting_address,
+						     setting ) ) != 0 )
+			return rc;
+		break;
+	case QUICKUSB_IOC_GPPIO_GET_DEFAULT_LEVELS:
+		if ( ( rc = quickusb_read_setting ( gppio->quickusb->usb,
+						    setting_address,
+						    &setting ) ) != 0 )
+			return rc;
+		data = ( setting & 0xff );
+		break;
+	case QUICKUSB_IOC_GPPIO_SET_DEFAULT_LEVELS:
+		if ( ( rc = quickusb_read_setting ( gppio->quickusb->usb,
+						    setting_address,
+						    &setting ) ) != 0 )
+			return rc;
+		setting = ( ( setting & 0xff00 ) | ( data & 0xff ) );
+		if ( ( rc = quickusb_write_setting ( gppio->quickusb->usb,
+						     setting_address,
+						     setting ) ) != 0 )
 			return rc;
 		break;
 	default:
@@ -268,42 +306,6 @@ static ssize_t quickusb_hspio_write_data ( struct file *file,
 	return len;
 }
 
-static int quickusb_hspio_ioctl ( struct inode *inode, struct file *file,
-				  unsigned int cmd, unsigned long arg ) {
-	struct quickusb_hspio *hspio = file->private_data;
-	void __user *user_data = ( void __user * ) arg;
-	quickusb_hspio_ioctl_data_t data;
-	uint16_t fifoconfig;
-	int rc;
-
-	if ( ( rc = copy_from_user ( &data, user_data, sizeof (data) ) ) != 0 )
-		return rc;
-
-	switch ( cmd ) {
-	case QUICKUSB_IOC_HSPIO_GET_FIFOCONFIG:
-		if ( ( rc = quickusb_read_setting ( hspio->quickusb->usb,
-						    QUICKUSB_FIFOCONFIG,
-						    &fifoconfig ) ) != 0 )
-			return rc;
-		data = fifoconfig;
-		break;
-	case QUICKUSB_IOC_HSPIO_SET_FIFOCONFIG:
-		fifoconfig = data;
-		if ( ( rc = quickusb_write_setting ( hspio->quickusb->usb,
-						     QUICKUSB_FIFOCONFIG,
-						     fifoconfig ) ) != 0 )
-			return rc;
-		break;
-	default:
-		return -ENOTTY;
-	}
-
-	if ( ( rc = copy_to_user ( user_data, &data, sizeof ( data ) ) ) != 0 )
-		return rc;
-
-	return 0;
-}
-
 static int quickusb_hspio_release ( struct inode *inode, struct file *file ) {
 	struct quickusb_hspio *hspio = file->private_data;
 	
@@ -322,7 +324,6 @@ static struct file_operations quickusb_hspio_data_fops = {
 	.owner		= THIS_MODULE,
 	.read		= quickusb_hspio_read_data,
 	.write		= quickusb_hspio_write_data,
-	.ioctl		= quickusb_hspio_ioctl,
 	.release	= quickusb_hspio_release,
 };
 
