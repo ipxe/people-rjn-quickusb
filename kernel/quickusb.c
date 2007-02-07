@@ -130,72 +130,92 @@ static ssize_t quickusb_gppio_write ( struct file *file,
 static int quickusb_gppio_ioctl ( struct inode *inode, struct file *file,
 				  unsigned int cmd, unsigned long arg ) {
 	struct quickusb_gppio *gppio = file->private_data;
+	struct quickusb_device *quickusb = gppio->quickusb;
 	void __user *user_data = ( void __user * ) arg;
-	quickusb_gppio_ioctl_data_t data;
+	size_t ioctl_size = _IOC_SIZE(cmd);
+	union {
+		quickusb_gppio_ioctl_data_t gppio;
+		struct quickusb_setting_ioctl_data setting;
+		char bytes[ioctl_size];
+	} u;
 	unsigned char outputs;
-	unsigned int setting_address = QUICKUSB_SETTING_GPPIO ( gppio->port );
-	uint16_t setting;
+	uint16_t default_address = QUICKUSB_SETTING_GPPIO ( gppio->port );
+	uint16_t default_value;
 	int rc;
 
-	if ( ( rc = copy_from_user ( &data, user_data, sizeof (data) ) ) != 0 )
+	if ( ( rc = copy_from_user ( u.bytes, user_data, ioctl_size ) ) != 0 )
 		return rc;
 
 	switch ( cmd ) {
 	case QUICKUSB_IOC_GPPIO_GET_OUTPUTS:
-		if ( ( rc = quickusb_read_port_dir ( gppio->quickusb->usb,
+		if ( ( rc = quickusb_read_port_dir ( quickusb->usb,
 						     gppio->port,
 						     &outputs ) ) != 0 )
 			return rc;
-		data = outputs;
+		u.gppio = outputs;
 		break;
 	case QUICKUSB_IOC_GPPIO_SET_OUTPUTS:
-		outputs = data;
-		if ( ( rc = quickusb_write_port_dir ( gppio->quickusb->usb,
+		outputs = u.gppio;
+		if ( ( rc = quickusb_write_port_dir ( quickusb->usb,
 						      gppio->port,
 						      outputs ) ) != 0 )
 			return rc;
 		break;
 	case QUICKUSB_IOC_GPPIO_GET_DEFAULT_OUTPUTS:
-		if ( ( rc = quickusb_read_setting ( gppio->quickusb->usb,
-						    setting_address,
-						    &setting ) ) != 0 )
+		if ( ( rc = quickusb_read_setting ( quickusb->usb,
+						    default_address,
+						    &default_value ) ) != 0 )
 			return rc;
-		data = ( setting >> 8 );
+		u.gppio = ( default_value >> 8 );
 		break;
 	case QUICKUSB_IOC_GPPIO_SET_DEFAULT_OUTPUTS:
-		if ( ( rc = quickusb_read_setting ( gppio->quickusb->usb,
-						    setting_address,
-						    &setting ) ) != 0 )
+		if ( ( rc = quickusb_read_setting ( quickusb->usb,
+						    default_address,
+						    &default_value ) ) != 0 )
 			return rc;
-		setting = ( ( setting & 0x00ff ) | ( data << 8 ) );
-		if ( ( rc = quickusb_write_setting ( gppio->quickusb->usb,
-						     setting_address,
-						     setting ) ) != 0 )
+		default_value &= 0x00ff;
+		default_value |= ( u.gppio << 8 );
+		if ( ( rc = quickusb_write_setting ( quickusb->usb,
+						     default_address,
+						     default_value ) ) != 0 )
 			return rc;
 		break;
 	case QUICKUSB_IOC_GPPIO_GET_DEFAULT_LEVELS:
-		if ( ( rc = quickusb_read_setting ( gppio->quickusb->usb,
-						    setting_address,
-						    &setting ) ) != 0 )
+		if ( ( rc = quickusb_read_setting ( quickusb->usb,
+						    default_address,
+						    &default_value ) ) != 0 )
 			return rc;
-		data = ( setting & 0xff );
+		u.gppio = ( default_value & 0x00ff );
 		break;
 	case QUICKUSB_IOC_GPPIO_SET_DEFAULT_LEVELS:
-		if ( ( rc = quickusb_read_setting ( gppio->quickusb->usb,
-						    setting_address,
-						    &setting ) ) != 0 )
+		if ( ( rc = quickusb_read_setting ( quickusb->usb,
+						    default_address,
+						    &default_value ) ) != 0 )
 			return rc;
-		setting = ( ( setting & 0xff00 ) | ( data & 0xff ) );
-		if ( ( rc = quickusb_write_setting ( gppio->quickusb->usb,
-						     setting_address,
-						     setting ) ) != 0 )
+		default_value &= 0x00ff;
+		default_value |= ( u.gppio & 0x00ff );
+		if ( ( rc = quickusb_write_setting ( quickusb->usb,
+						     default_address,
+						     default_value ) ) != 0 )
+			return rc;
+		break;
+	case QUICKUSB_IOC_GET_SETTING:
+		if ( ( rc = quickusb_read_setting ( quickusb->usb,
+						    u.setting.address,
+						    &u.setting.value ) ) != 0 )
+			return rc;
+		break;
+	case QUICKUSB_IOC_SET_SETTING:
+		if ( ( rc = quickusb_write_setting ( quickusb->usb,
+						     u.setting.address,
+						     u.setting.value ) ) != 0 )
 			return rc;
 		break;
 	default:
 		return -ENOTTY;
 	}
 
-	if ( ( rc = copy_to_user ( user_data, &data, sizeof ( data ) ) ) != 0 )
+	if ( ( rc = copy_to_user ( user_data, u.bytes, ioctl_size ) ) != 0 )
 		return rc;
 
 	return 0;

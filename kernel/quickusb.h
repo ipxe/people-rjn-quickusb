@@ -316,4 +316,14 @@ typedef uint32_t quickusb_gppio_ioctl_data_t;
 #define QUICKUSB_IOC_GPPIO_SET_DEFAULT_LEVELS \
 	_IOW ( 'Q', 0x05, quickusb_gppio_ioctl_data_t )
 
+typedef struct quickusb_setting_ioctl_data {
+	uint16_t address;
+	uint16_t value;
+} quickusb_setting_ioctl_data_t;
+
+#define QUICKUSB_IOC_GET_SETTING \
+	_IOWR ( 'Q', 0x06, struct quickusb_setting_ioctl_data )
+#define QUICKUSB_IOC_SET_SETTING \
+	_IOW ( 'Q', 0x07, struct quickusb_setting_ioctl_data )
+
 #endif /* QUICKUSB_H */
