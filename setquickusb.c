@@ -118,7 +118,7 @@ void gppio_ioctl ( int fd, const char *name, struct action *action,
 				  strerror ( errno ) );
 			exit ( EXIT_FAILURE );
 		}
-		printf ( "%s = %#02x\n", name, data );
+		printf ( "%s = 0x%02x\n", name, data );
 		break;
 	case SET:
 		data = action->value;
@@ -146,7 +146,7 @@ void setting_ioctl ( int fd, unsigned int setting, struct action *action ) {
 				  setting, strerror ( errno ) );
 			exit ( EXIT_FAILURE );
 		}
-		printf ( "setting[%d] = %#04x\n", setting, data.value );
+		printf ( "setting[%d] = 0x%04x\n", setting, data.value );
 		break;
 	case SET:
 		if ( ioctl ( fd, QUICKUSB_IOC_SET_SETTING, &data ) != 0 ) {
