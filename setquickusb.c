@@ -31,9 +31,6 @@
 
 #define eprintf(...) fprintf ( stderr, __VA_ARGS__ )
 
-#define DO_NOTHING -1UL
-#define SHOW_SETTING -2UL
-
 /*
  * Options
  *
@@ -41,26 +38,41 @@
  *                  presented in either decimal or hexadecimal form
  */
 
-struct options {
-	unsigned long outputs;
-	unsigned long default_outputs;
-	unsigned long default_levels;
+enum action_type {
+	DO_NOTHING = 0,
+	SHOW = 1,
+	SET = 2,
 };
 
-void gppio_ioctl ( int fd, const char *name, unsigned long option,
+struct action {
+	unsigned int type;
+	unsigned int value;
+};
+
+struct options {
+	struct action outputs;
+	struct action default_outputs;
+	struct action default_levels;
+	struct action settings[16];
+};
+
+void gppio_ioctl ( int fd, const char *name, struct action *action,
 		   int get_ioctl, int set_ioctl );
+void setting_ioctl ( int fd, unsigned int setting, struct action *action );
 int parseopts ( const int, char **argv, struct options * );
-unsigned long parseint ( const char * );
+void parsegppio ( struct action *action, const char *arg );
+void parsesetting ( struct options *options, const char *arg );
 void printhelp ();
 
 int main ( int argc, char* argv[] ) {
-	struct options opts = {
-		.outputs		= DO_NOTHING,
-		.default_outputs	= DO_NOTHING,
-		.default_levels		= DO_NOTHING,
-	};
-	int last_index = parseopts(argc,argv,&opts), fd;
+	struct options opts;
+	int last_index;
+	int fd;
+	unsigned int i;
 
+	memset ( &opts, 0, sizeof ( opts ) );
+
+	last_index = parseopts ( argc, argv, &opts );
 	if ( last_index == ( argc - 1 ) ) {
 		fd = open( argv[last_index], O_RDWR );
 	} else {
@@ -74,28 +86,33 @@ int main ( int argc, char* argv[] ) {
     		exit(EXIT_FAILURE);
 	}
 
-	gppio_ioctl ( fd, "outputs", opts.outputs,
+	gppio_ioctl ( fd, "outputs", &opts.outputs,
 		      QUICKUSB_IOC_GPPIO_GET_OUTPUTS,
 		      QUICKUSB_IOC_GPPIO_SET_OUTPUTS );
-	gppio_ioctl ( fd, "default-outputs", opts.default_outputs,
+	gppio_ioctl ( fd, "default-outputs", &opts.default_outputs,
 		      QUICKUSB_IOC_GPPIO_GET_DEFAULT_OUTPUTS,
 		      QUICKUSB_IOC_GPPIO_SET_DEFAULT_OUTPUTS );
-	gppio_ioctl ( fd, "default-levels", opts.default_levels,
+	gppio_ioctl ( fd, "default-levels", &opts.default_levels,
 		      QUICKUSB_IOC_GPPIO_GET_DEFAULT_LEVELS,
 		      QUICKUSB_IOC_GPPIO_SET_DEFAULT_LEVELS );
+
+	for ( i = 0 ; ( i < ( sizeof ( opts.settings ) /
+			      sizeof ( opts.settings[0] ) ) ) ; i++ ) {
+		setting_ioctl ( fd, i, &opts.settings[i] );
+	}
 
 	close(fd);
 	return 0;
 }
 
-void gppio_ioctl ( int fd, const char *name, unsigned long option,
+void gppio_ioctl ( int fd, const char *name, struct action *action,
 		   int get_ioctl, int set_ioctl ) {
 	quickusb_gppio_ioctl_data_t data;
 
-	switch ( option ) {
+	switch ( action->type ) {
 	case DO_NOTHING:
 		break;
-	case SHOW_SETTING:
+	case SHOW:
 		if ( ioctl ( fd, get_ioctl, &data ) != 0 ) {
 			eprintf ( "Could not get %s: %s\n", name,
 				  strerror ( errno ) );
@@ -103,11 +120,38 @@ void gppio_ioctl ( int fd, const char *name, unsigned long option,
 		}
 		printf ( "%s = %#02x\n", name, data );
 		break;
-	default:
-		data = option;
+	case SET:
+		data = action->value;
 		if ( ioctl ( fd, set_ioctl, &data ) != 0 ) {
 			eprintf ( "Could not set %s: %s\n", name,
 				  strerror ( errno ) );
+			exit ( EXIT_FAILURE );
+		}
+		break;
+	}
+}
+
+void setting_ioctl ( int fd, unsigned int setting, struct action *action ) {
+	struct quickusb_setting_ioctl_data data;
+
+	data.address = setting;
+	data.value = action->value;
+
+	switch ( action->type ) {
+	case DO_NOTHING:
+		break;
+	case SHOW:
+		if ( ioctl ( fd, QUICKUSB_IOC_GET_SETTING, &data ) != 0 ) {
+			eprintf ( "Could not get setting %d: %s\n",
+				  setting, strerror ( errno ) );
+			exit ( EXIT_FAILURE );
+		}
+		printf ( "setting[%d] = %#04x\n", setting, data.value );
+		break;
+	case SET:
+		if ( ioctl ( fd, QUICKUSB_IOC_SET_SETTING, &data ) != 0 ) {
+			eprintf ( "Could not set setting %d: %s\n",
+				  setting, strerror ( errno ) );
 			exit ( EXIT_FAILURE );
 		}
 		break;
@@ -127,64 +171,103 @@ int parseopts ( const int argc, char **argv, struct options *opts ) {
 			{ "outputs", optional_argument, NULL, 'o' },
 			{ "default-outputs", optional_argument, NULL, 'd' },
 			{ "default-levels", optional_argument, NULL, 'l' },
+			{ "setting", required_argument, NULL, 's' },
 			{ "help", 0, NULL, 'h' },
 			{ 0, 0, 0, 0 }
 		};
 
-		if ( ( c = getopt_long ( argc, argv, "o::d::l::h",
+		if ( ( c = getopt_long ( argc, argv, "o::d::l::s:h",
 					 long_options,
 					 &option_index ) ) == -1 ) {
 			break;
 		}
 
-		switch(c) {
-			case 'o':
-				opts->outputs = parseint(optarg);
-				break;
-			case 'd':
-				opts->default_outputs = parseint(optarg);
-				break;
-			case 'l':
-				opts->default_levels = parseint(optarg);
-				break;
-			case 'h':
-				printhelp();
-				break;
-			case '?':
-			default:
-				eprintf("Warning: unrecognised character code "
-					"%o\n", c);
-				if (optarg) {
-					eprintf("         with arg %s\n",
-						optarg);
-				}
-				eprintf("Use -h to print help.\n");
-				exit(EXIT_FAILURE);
+		switch ( c ) {
+		case 'o':
+			parsegppio ( &opts->outputs, optarg );
+			break;
+		case 'd':
+			parsegppio ( &opts->default_outputs, optarg );
+			break;
+		case 'l':
+			parsegppio ( &opts->default_levels, optarg );
+			break;
+		case 's':
+			parsesetting ( opts, optarg );
+			break;
+		case 'h':
+			printhelp();
+			break;
+		case '?':
+		default:
+			eprintf ( "Warning: unrecognised character code %o\n",
+				  c );
+			if ( optarg ) {
+				eprintf ( "         with arg %s\n", optarg );
+			}
+			eprintf ( "Use -h to print help.\n" );
+			exit ( EXIT_FAILURE );
 		}
 	}
 	return optind;
 }
 
-unsigned long parseint ( const char *nPtr ) {
+void parsegppio ( struct action *action, const char *arg ) {
 	unsigned long tmp;
-	char *endPtr;
+	char *end;
 
-	if ( ! nPtr )
-		return SHOW_SETTING;
+	if ( arg ) {
+		if ( *arg == '\0' ) {
+			eprintf ( "Error: No value specified\n" );
+			exit ( EXIT_FAILURE );
+		}
+		
+		tmp = strtoul ( arg, &end, 0 );
+		if ( *end != '\0' ) {
+			eprintf ( "Error: Invalid value \"%s\"\n", arg );
+			exit ( EXIT_FAILURE );
+		}
+		
+		action->type = SET;
+		action->value = tmp;
+	} else {
+		action->type = SHOW;
+	}
+}
 
-	if ( *nPtr == '\0' ) {
-		eprintf("Error: No value specified\n");
-		exit(EXIT_FAILURE);
+void parsesetting ( struct options *options, const char *arg ) {
+	unsigned long setting;
+	unsigned long value = 0;
+	int type = SHOW;
+	char *end;
+	
+	if ( *arg == '\0' ) {
+		eprintf ( "Error: No setting specified\n" );
+		exit ( EXIT_FAILURE );
+	}
+	setting = strtoul ( arg, &end, 0 );
+	if ( *end == '=' ) {
+		end++;
+		if ( *end == '\0' ) {
+			eprintf ( "Error: No setting value specified\n" );
+			exit ( EXIT_FAILURE );
+		}
+		type = SET;
+		value = strtoul ( end, &end, 0 );
+	}
+	if ( *end != '\0' ) {
+		eprintf ( "Error: Invalid setting string \"%s\"\n", arg );
+		exit ( EXIT_FAILURE );
 	}
 
-	tmp = strtoul ( nPtr, &endPtr, 0 );
-
-	if ( *endPtr != '\0' ) {
-		eprintf("Error: Invalid value \"%s\"\n", nPtr);
-		exit(EXIT_FAILURE);
+	if ( setting >= ( sizeof ( options->settings ) /
+			  sizeof ( options->settings[0] ) ) ) {
+		eprintf ( "Error: Setting %ld out of range\n", setting );
+		exit ( EXIT_FAILURE );
 	}
 
-	return tmp;
+	options->settings[setting].type = type;
+	options->settings[setting].value = value;
 }
 
 /*
