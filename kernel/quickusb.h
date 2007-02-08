@@ -22,7 +22,13 @@
 #define QUICKUSB_WINDEX_GPPIO_DIR	0
 #define QUICKUSB_WINDEX_GPPIO_DATA	1
 
-#define QUICKUSB_SETTING_GPPIO(port) ( 9 + (port) )
+#define QUICKUSB_SETTING_FIFOCONFIG	3
+#define QUICKUSB_SETTING_GPPIO(port)	( 9 + (port) )
+
+#define QUICKUSB_HSPPMODE_GPIO		0x00
+#define QUICKUSB_HSPPMODE_MASTER	0x02
+#define QUICKUSB_HSPPMODE_SLAVE		0x03
+#define QUICKUSB_HSPPMODE_MASK		0x03
 
 #define QUICKUSB_TIMEOUT ( 1 * HZ )
 
@@ -79,6 +85,36 @@ static inline int quickusb_write_setting ( struct usb_device *usb,
 		return ret;
 
 	return 0;
+}
+
+/**
+ * quickusb_read_default - read device default setting
+ *
+ * @usb: USB device
+ * @address: Setting address
+ * @setting: Value of the setting
+ *
+ * Returns 0 for success, or negative error number
+ */
+static inline int quickusb_read_default ( struct usb_device *usb,
+					  unsigned int address,
+					  uint16_t *setting ) {
+	return -ENOTTY;
+}
+
+/**
+ * quickusb_write_default - write device default setting
+ *
+ * @usb: USB device
+ * @address: Setting address
+ * @setting: Value of the setting
+ *
+ * Returns 0 for success, or negative error number
+ */
+static inline int quickusb_write_default ( struct usb_device *usb,
+					   unsigned int address,
+					   uint16_t setting ) {
+	return -ENOTTY;
 }
 
 /**

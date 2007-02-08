@@ -75,10 +75,37 @@ static LIST_HEAD ( quickusb_list );
 
 static DECLARE_MUTEX ( quickusb_lock );
 
-static struct class_simple *quickusb_class;
+static struct class *quickusb_class;
 
 static int debug = 0;
 static int dev_major = 0;
+
+static struct usb_device_id quickusb_ids[];
+
+/****************************************************************************
+ *
+ * Common operations
+ *
+ */
+
+static int quickusb_set_hsppmode ( struct quickusb_device *quickusb,
+				   unsigned int hsppmode ) {
+	uint16_t fifoconfig;
+	int rc;
+
+	if ( ( rc = quickusb_read_setting ( quickusb->usb,
+					    QUICKUSB_SETTING_FIFOCONFIG,
+					    &fifoconfig ) ) != 0 )
+		return rc;
+	fifoconfig &= ~QUICKUSB_HSPPMODE_MASK;
+	fifoconfig |= ( hsppmode & QUICKUSB_HSPPMODE_MASK );
+	if ( ( rc = quickusb_write_setting ( quickusb->usb,
+					     QUICKUSB_SETTING_FIFOCONFIG,
+					     fifoconfig ) ) != 0 )
+		return rc;
+
+	return 0;
+}
 
 /****************************************************************************
  *
@@ -162,39 +189,39 @@ static int quickusb_gppio_ioctl ( struct inode *inode, struct file *file,
 			return rc;
 		break;
 	case QUICKUSB_IOC_GPPIO_GET_DEFAULT_OUTPUTS:
-		if ( ( rc = quickusb_read_setting ( quickusb->usb,
+		if ( ( rc = quickusb_read_default ( quickusb->usb,
 						    default_address,
 						    &default_value ) ) != 0 )
 			return rc;
 		u.gppio = ( default_value >> 8 );
 		break;
 	case QUICKUSB_IOC_GPPIO_SET_DEFAULT_OUTPUTS:
-		if ( ( rc = quickusb_read_setting ( quickusb->usb,
+		if ( ( rc = quickusb_read_default ( quickusb->usb,
 						    default_address,
 						    &default_value ) ) != 0 )
 			return rc;
 		default_value &= 0x00ff;
 		default_value |= ( u.gppio << 8 );
-		if ( ( rc = quickusb_write_setting ( quickusb->usb,
+		if ( ( rc = quickusb_write_default ( quickusb->usb,
 						     default_address,
 						     default_value ) ) != 0 )
 			return rc;
 		break;
 	case QUICKUSB_IOC_GPPIO_GET_DEFAULT_LEVELS:
-		if ( ( rc = quickusb_read_setting ( quickusb->usb,
+		if ( ( rc = quickusb_read_default ( quickusb->usb,
 						    default_address,
 						    &default_value ) ) != 0 )
 			return rc;
 		u.gppio = ( default_value & 0x00ff );
 		break;
 	case QUICKUSB_IOC_GPPIO_SET_DEFAULT_LEVELS:
-		if ( ( rc = quickusb_read_setting ( quickusb->usb,
+		if ( ( rc = quickusb_read_default ( quickusb->usb,
 						    default_address,
 						    &default_value ) ) != 0 )
 			return rc;
 		default_value &= 0x00ff;
 		default_value |= ( u.gppio & 0x00ff );
-		if ( ( rc = quickusb_write_setting ( quickusb->usb,
+		if ( ( rc = quickusb_write_default ( quickusb->usb,
 						     default_address,
 						     default_value ) ) != 0 )
 			return rc;
@@ -241,6 +268,17 @@ static struct file_operations quickusb_gppio_fops = {
  * HSPIO char device operations (master mode)
  *
  */
+
+static int quickusb_hspio_open ( struct inode *inode, struct file *file ) {
+	struct quickusb_hspio *hspio = file->private_data;
+	int rc;
+
+	if ( ( rc = quickusb_set_hsppmode ( hspio->quickusb,
+					    QUICKUSB_HSPPMODE_MASTER ) ) != 0 )
+		return rc;
+
+	return 0;
+}
 
 static ssize_t quickusb_hspio_read_command ( struct file *file,
 					     char __user *user_data,
@@ -335,6 +373,7 @@ static int quickusb_hspio_release ( struct inode *inode, struct file *file ) {
 
 static struct file_operations quickusb_hspio_command_fops = {
 	.owner		= THIS_MODULE,
+	.open		= quickusb_hspio_open,
 	.read		= quickusb_hspio_read_command,
 	.write		= quickusb_hspio_write_command,
 	.release	= quickusb_hspio_release,
@@ -342,9 +381,45 @@ static struct file_operations quickusb_hspio_command_fops = {
 
 static struct file_operations quickusb_hspio_data_fops = {
 	.owner		= THIS_MODULE,
+	.open		= quickusb_hspio_open,
 	.read		= quickusb_hspio_read_data,
 	.write		= quickusb_hspio_write_data,
 	.release	= quickusb_hspio_release,
+};
+
+/****************************************************************************
+ *
+ * HSPIO ttyUSB device operations (slave mode)
+ *
+ */
+
+static int quickusb_ttyusb_open ( struct usb_serial_port *port,
+				  struct file *file ) {
+	struct quickusb_device *quickusb
+		= usb_get_intfdata ( port->serial->interface );
+	int rc;
+
+	if ( ( rc = quickusb_set_hsppmode ( quickusb,
+					    QUICKUSB_HSPPMODE_SLAVE ) ) != 0 )
+		return rc;
+
+	if ( ( rc = usb_serial_generic_open ( port, file ) ) != 0 )
+		return rc;
+
+	return 0;
+}
+
+static struct usb_serial_driver quickusb_serial = {
+	.driver = {
+		.owner	= THIS_MODULE,
+		.name	= "quickusb",
+	},
+	.open		= quickusb_ttyusb_open,
+	.id_table	= quickusb_ids,
+	.num_interrupt_in = NUM_DONT_CARE,
+	.num_bulk_in	= NUM_DONT_CARE,
+	.num_bulk_out	= NUM_DONT_CARE,
+	.num_ports	= 1,
 };
 
 /****************************************************************************
@@ -437,10 +512,9 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 		goto err_devfs;
 
 	/* Create class device */
-	subdev->class_dev = class_simple_device_add ( quickusb_class,
-						      subdev->dev,
-						      &interface->dev,
-						      subdev->name );
+	subdev->class_dev = class_device_create ( quickusb_class, NULL,
+						  subdev->dev, &interface->dev,
+						  subdev->name );
 	if ( IS_ERR ( subdev->class_dev ) ) {
 		rc = PTR_ERR ( subdev->class_dev );
 		goto err_class;
@@ -463,7 +537,7 @@ static void quickusb_deregister_subdev ( struct quickusb_device *quickusb,
 		return;
 
 	/* Remove class device */
-	class_simple_device_remove ( subdev->dev );
+	class_device_destroy ( quickusb_class, subdev->dev );
 
 	/* Remove devfs device */
 	devfs_remove ( subdev->name );
@@ -628,21 +702,14 @@ static struct usb_device_id quickusb_ids[] = {
 };
 
 static struct usb_driver quickusb_driver = {
-	.owner		= THIS_MODULE,
+	.driver = {
+		.owner	= THIS_MODULE,
+		.name	= "quickusb",
+	},
 	.name		= "quickusb",
 	.probe		= quickusb_probe,
 	.disconnect	= quickusb_disconnect,
 	.id_table	= quickusb_ids,
-};
-
-static struct usb_serial_device_type quickusb_serial = {
-	.owner		= THIS_MODULE,
-	.name		= "quickusb",
-	.id_table	= quickusb_ids,
-	.num_interrupt_in = NUM_DONT_CARE,
-	.num_bulk_in	= NUM_DONT_CARE,
-	.num_bulk_out	= NUM_DONT_CARE,
-	.num_ports	= 1,
 };
 
 /****************************************************************************
@@ -668,7 +735,7 @@ static int quickusb_init ( void ) {
 	}
 	
 	/* Create device class */
-	quickusb_class = class_simple_create ( THIS_MODULE, "quickusb" );
+	quickusb_class = class_create ( THIS_MODULE, "quickusb" );
 	if ( IS_ERR ( quickusb_class ) ) {
 		rc = PTR_ERR ( quickusb_class );
 		printk ( KERN_ERR "quickusb could not create device class: "
@@ -687,7 +754,7 @@ static int quickusb_init ( void ) {
  err_usb:
 	usb_serial_deregister ( &quickusb_serial );
  err_usbserial:
-	class_simple_destroy ( quickusb_class );
+	class_destroy ( quickusb_class );
  err_class:
 	unregister_chrdev ( dev_major, "quickusb" );
  err_chrdev:
@@ -697,7 +764,7 @@ static int quickusb_init ( void ) {
 static void quickusb_exit ( void ) {
 	usb_deregister ( &quickusb_driver );
 	usb_serial_deregister ( &quickusb_serial );
-	class_simple_destroy ( quickusb_class );
+	class_destroy ( quickusb_class );
 	unregister_chrdev ( dev_major, "quickusb" );
 }
 
