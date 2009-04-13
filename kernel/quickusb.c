@@ -12,13 +12,11 @@
 
 #include <linux/module.h>
 #include <linux/fs.h>
-#include <linux/devfs_fs_kernel.h>
 #include <linux/usb.h>
 #include <linux/tty.h>
-#include <asm/uaccess.h>
-#include "usb-serial.h"
+#include <linux/usb/serial.h>
+#include <linux/uaccess.h>
 #include "quickusb.h"
-#include "kernel_compat.h"
 
 #define QUICKUSB_VENDOR_ID 0x0fbb
 #define QUICKUSB_DEVICE_ID 0x0001
@@ -48,7 +46,7 @@ struct quickusb_subdev {
 	void *private_data;
 	dev_t dev;
 	unsigned char name[32];
-	struct class_device *class_dev;
+	struct device *class_dev;
 };
 
 struct quickusb_device {
@@ -393,7 +391,8 @@ static struct file_operations quickusb_hspio_data_fops = {
  *
  */
 
-static int quickusb_ttyusb_open ( struct usb_serial_port *port,
+static int quickusb_ttyusb_open ( struct tty_struct *tty,
+				  struct usb_serial_port *port,
 				  struct file *file ) {
 	struct quickusb_device *quickusb
 		= usb_get_intfdata ( port->serial->interface );
@@ -403,7 +402,7 @@ static int quickusb_ttyusb_open ( struct usb_serial_port *port,
 					    QUICKUSB_HSPPMODE_SLAVE ) ) != 0 )
 		return rc;
 
-	if ( ( rc = usb_serial_generic_open ( port, file ) ) != 0 )
+	if ( ( rc = usb_serial_generic_open ( tty, port, file ) ) != 0 )
 		return rc;
 
 	return 0;
@@ -416,9 +415,6 @@ static struct usb_serial_driver quickusb_serial = {
 	},
 	.open		= quickusb_ttyusb_open,
 	.id_table	= quickusb_ids,
-	.num_interrupt_in = NUM_DONT_CARE,
-	.num_bulk_in	= NUM_DONT_CARE,
-	.num_bulk_out	= NUM_DONT_CARE,
 	.num_ports	= 1,
 };
 
@@ -504,17 +500,9 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 	vsnprintf ( subdev->name, sizeof ( subdev->name ), subdev_fmt, ap );
 	va_end ( ap );
 
-	/* Create devfs device */
-	if ( ( rc = devfs_mk_cdev ( subdev->dev,
-				    ( S_IFCHR | S_IRUSR | S_IWUSR |
-				      S_IRGRP | S_IWGRP ),
-				    subdev->name ) ) != 0 )
-		goto err_devfs;
-
 	/* Create class device */
-	subdev->class_dev = class_device_create ( quickusb_class, NULL,
-						  subdev->dev, &interface->dev,
-						  subdev->name );
+	subdev->class_dev = device_create ( quickusb_class, NULL, subdev->dev,
+					    &interface->dev, subdev->name );
 	if ( IS_ERR ( subdev->class_dev ) ) {
 		rc = PTR_ERR ( subdev->class_dev );
 		goto err_class;
@@ -523,8 +511,6 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 	return 0;
 
  err_class:
-	devfs_remove ( subdev->name );
- err_devfs:
 	memset ( subdev, 0, sizeof ( *subdev ) );
 	return rc;
 }
@@ -537,10 +523,7 @@ static void quickusb_deregister_subdev ( struct quickusb_device *quickusb,
 		return;
 
 	/* Remove class device */
-	class_device_destroy ( quickusb_class, subdev->dev );
-
-	/* Remove devfs device */
-	devfs_remove ( subdev->name );
+	device_destroy ( quickusb_class, subdev->dev );
 
 	/* Clear subdev structure */
 	memset ( subdev, 0, sizeof ( *subdev ) );
@@ -702,10 +685,6 @@ static struct usb_device_id quickusb_ids[] = {
 };
 
 static struct usb_driver quickusb_driver = {
-	.driver = {
-		.owner	= THIS_MODULE,
-		.name	= "quickusb",
-	},
 	.name		= "quickusb",
 	.probe		= quickusb_probe,
 	.disconnect	= quickusb_disconnect,

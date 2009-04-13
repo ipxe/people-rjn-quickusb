@@ -12,7 +12,7 @@ KVERPARTS = $(subst ., ,$(KVER))
 KVERMAJOR = $(word 1,$(KVERPARTS))_$(word 2,$(KVERPARTS))
 
 # Compiler flags
-EXTRA_CFLAGS += -Wall -I${PWD} -I$(KSRCDIR)/drivers/usb/serial
+EXTRA_CFLAGS += -Wall -I${PWD}
 
 # For 2.6 kernel modules
 ifeq ($(KVERMAJOR),2_6)
