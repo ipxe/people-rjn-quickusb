@@ -502,7 +502,8 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 
 	/* Create class device */
 	subdev->class_dev = device_create ( quickusb_class, NULL, subdev->dev,
-					    &interface->dev, subdev->name );
+					    &interface->dev, "%s",
+					    subdev->name );
 	if ( IS_ERR ( subdev->class_dev ) ) {
 		rc = PTR_ERR ( subdev->class_dev );
 		goto err_class;
