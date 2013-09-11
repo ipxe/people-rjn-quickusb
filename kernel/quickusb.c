@@ -14,8 +14,11 @@
 #include <linux/fs.h>
 #include <linux/usb.h>
 #include <linux/tty.h>
+#include <linux/kernel.h>
+#include <linux/scatterlist.h>
 #include <linux/usb/serial.h>
-#include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <asm/uaccess.h>
 #include "quickusb.h"
 
 #define QUICKUSB_VENDOR_ID 0x0fbb
@@ -32,6 +35,12 @@
 
 #define QUICKUSB_MAX_GPPIO 5
 
+#define INTERRUPT_RATE 1 /* msec/transfer */
+
+#define ERROR(fmt, args...) printk(KERN_ERR fmt , ## args)
+#define INFO(fmt, args...) printk(KERN_INFO fmt , ## args)
+#define DBG(fmt, args...) printk(KERN_DEBUG fmt , ## args)
+
 struct quickusb_gppio {
 	struct quickusb_device *quickusb;
 	unsigned int port;
@@ -46,7 +55,7 @@ struct quickusb_subdev {
 	void *private_data;
 	dev_t dev;
 	unsigned char name[32];
-	struct device *class_dev;
+	struct device *devp;
 };
 
 struct quickusb_device {
@@ -71,7 +80,7 @@ static void quickusb_delete ( struct kref *kref ) {
 
 static LIST_HEAD ( quickusb_list );
 
-static DECLARE_MUTEX ( quickusb_lock );
+static DEFINE_SEMAPHORE ( quickusb_lock );
 
 static struct class *quickusb_class;
 
@@ -79,6 +88,113 @@ static int debug = 0;
 static int dev_major = 0;
 
 static struct usb_device_id quickusb_ids[];
+
+/****************************************************************************
+ *
+ * Auxiliary scatter-gather functions
+ *
+ ****************************************************************************/
+
+struct buffer_size_pair
+{
+	char *buffer;
+	int   size;
+};
+
+
+static void free_ba( struct buffer_size_pair *ba, int n )
+{
+	unsigned	i;
+	if (!ba)
+		return;
+	for (i = 0; i < n; i++) {
+		if (ba[i].buffer == NULL)
+			continue;
+		kfree( ba[i].buffer );
+	}
+	kfree(ba);
+}
+
+
+static void free_sglist(struct scatterlist *sg, int nents)
+{
+	unsigned i;
+	
+	if (!sg)
+		return;
+	for (i = 0; i < nents; i++) {
+		if (!sg_page(&sg[i]))
+			continue;
+		kfree (sg_virt(&sg[i]));
+	}
+	kfree (sg);
+}
+
+
+static struct scatterlist *alloc_sglist(int bytes, unsigned int *nents)
+{
+	struct scatterlist	*sg;
+	unsigned		i, entries;
+	unsigned		size = 128 * 1024; // 128K
+	struct buffer_size_pair *ba;
+	int                     ba_size = (bytes + PAGE_SIZE - 1)/PAGE_SIZE;
+	
+        *nents = 0;
+	ba = kzalloc ( ba_size * sizeof *ba, GFP_KERNEL );
+	if (!ba)
+		return NULL;
+        
+	entries = 0;
+	for (i = 0; i < ba_size; i++) {
+again:
+		ba[i].buffer = kzalloc( size, GFP_KERNEL );
+		if (!ba[i].buffer) {
+			if (size == PAGE_SIZE) {
+				free_ba( ba, i );
+				return NULL;
+			}
+			size /= 2;
+			goto again;
+		}
+		ba[i].size = size;
+		entries++;
+		bytes -= size;
+		if (bytes == 0)
+			break;
+		size = bytes < size ? bytes : size;
+	}
+	// Now we know number of entries
+	sg = kmalloc (entries * sizeof *sg, GFP_KERNEL);
+	if (!sg) {
+		free_ba( ba, entries );
+		return NULL;
+	}
+	sg_init_table(sg, entries);
+	
+	for (i = 0; i < entries; i++) {
+		sg_set_buf(&sg[i], ba[i].buffer, ba[i].size);
+	}
+	// remove temporary array
+	kfree (ba);
+        *nents = entries;
+	return sg;
+}
+
+static int perform_sglist ( struct usb_device *usb, int pipe,
+			    struct usb_sg_request *req,
+			    struct scatterlist *sg,
+			    int nents, size_t length)
+{
+	int ret = usb_sg_init (req, usb, pipe, 0, sg, nents, length, GFP_KERNEL);
+	if (!ret) {
+		usb_sg_wait (req);
+		ret = req->status;
+	}
+
+	if (ret)
+		printk(KERN_ERR "perform_sglist failed, rc %d\n", ret);
+	return ret;
+}
 
 /****************************************************************************
  *
@@ -152,8 +268,8 @@ static ssize_t quickusb_gppio_write ( struct file *file,
 	return len;
 }
 
-static int quickusb_gppio_ioctl ( struct inode *inode, struct file *file,
-				  unsigned int cmd, unsigned long arg ) {
+static long quickusb_gppio_ioctl ( struct file *file,
+				   unsigned int cmd, unsigned long arg ) {
 	struct quickusb_gppio *gppio = file->private_data;
 	struct quickusb_device *quickusb = gppio->quickusb;
 	void __user *user_data = ( void __user * ) arg;
@@ -257,7 +373,7 @@ static struct file_operations quickusb_gppio_fops = {
 	.owner		= THIS_MODULE,
 	.read		= quickusb_gppio_read,
 	.write		= quickusb_gppio_write,
-	.ioctl		= quickusb_gppio_ioctl,
+	.unlocked_ioctl	= quickusb_gppio_ioctl,
 	.release	= quickusb_gppio_release,
 };
 
@@ -323,41 +439,102 @@ static ssize_t quickusb_hspio_write_command ( struct file *file,
 static ssize_t quickusb_hspio_read_data ( struct file *file,
 					  char __user *user_data,
 					  size_t len, loff_t *ppos ) {
+	int rc, nents, i;
+	uint32_t len_le = cpu_to_le32 ( len );
+	struct scatterlist *sg, *s;
+	struct usb_sg_request req;
 	struct quickusb_hspio *hspio = file->private_data;
-	unsigned char data[QUICKUSB_MAX_BULK_DATA_LEN];
-	int rc;
-
-	if ( len > sizeof ( data ) )
-		len = sizeof ( data );
-
-	if ( ( rc = quickusb_read_data ( hspio->quickusb->usb,
-					 data, len ) ) != 0 )
+	struct usb_device *usb = hspio->quickusb->usb;
+	int pipe = usb_rcvbulkpipe ( usb, QUICKUSB_BULK_IN_EP );
+	
+	rc = usb_control_msg ( usb, usb_sndctrlpipe ( usb, 0 ),
+				QUICKUSB_BREQUEST_HSPIO,
+				QUICKUSB_BREQUESTTYPE_WRITE,
+				0, 0,
+				&len_le, sizeof ( len_le ),
+				QUICKUSB_TIMEOUT );
+	if ( rc < 0 )
 		return rc;
 
-	if ( ( rc = copy_to_user ( user_data, data, len ) ) != 0 )
+	/*
+	 * Allocate the largest possible chunks from kernel space with
+	 * total length 'len'
+	 * The output is scatterlist pointer and number of entries
+	 */
+	sg = alloc_sglist ( len, &nents );
+	if (!sg)
+		return -ENOMEM;
+	
+	/*
+	 * Perform actual IO operation using scatterlist 
+	 */
+	rc = perform_sglist ( hspio->quickusb->usb, pipe, &req, sg, nents, len );
+	if (rc < 0) {
+		free_sglist(sg, nents);
 		return rc;
-
-	*ppos += len;
+	}
+	
+	/*
+	 * Pass over all the buffers in scatterlist and copy
+	 * their contents to userspace buffer.
+	 */
+	for_each_sg(sg, s, nents, i) {
+		unsigned char *data = sg_virt(s);
+		unsigned length = s->length;
+		rc = copy_to_user ( user_data, data, length );
+		if (rc < 0) {
+			free_sglist(sg, nents);
+			return rc;
+		}
+		user_data += length;
+		*ppos += length;
+	}
+	
+	free_sglist(sg, nents);
 	return len;
 }
 
 static ssize_t quickusb_hspio_write_data ( struct file *file,
 					   const char __user *user_data,
 					   size_t len, loff_t *ppos ) {
+	int rc, nents, i;
+	struct scatterlist *sg, *s;
+	struct usb_sg_request req;
 	struct quickusb_hspio *hspio = file->private_data;
-	unsigned char data[QUICKUSB_MAX_BULK_DATA_LEN];
-	int rc;
+	struct usb_device *usb = hspio->quickusb->usb;
+	int pipe = usb_sndbulkpipe ( usb, QUICKUSB_BULK_OUT_EP );
 
-	if ( len > sizeof ( data ) )
-		len = sizeof ( data );
-
-	if ( ( rc = copy_from_user ( data, user_data, len ) ) != 0 )
+	
+	/*
+	 * Allocate the scatterlist according the requested 'len'
+	 */
+	sg = alloc_sglist( len, &nents );
+	if (!sg)
+		return -ENOMEM;
+	
+	/*
+	 * Go through all the buffers and copy the data from userspace...
+	 */
+	for_each_sg(sg, s, nents, i) {
+		unsigned char *data = sg_virt(s);
+		unsigned length = s->length;
+		rc = copy_from_user ( data, user_data, length );
+		if (rc != 0) {
+			free_sglist(sg, nents);
+			return rc;
+		}
+		user_data += length;
+	}
+	
+	/*
+	 * Perform the actual IO operation
+	 */
+	rc = perform_sglist ( usb, pipe, &req, sg, nents, len );
+	if (rc < 0) {
+		free_sglist(sg, nents);
 		return rc;
-
-	if ( ( rc = quickusb_write_data ( hspio->quickusb->usb,
-					  data, len ) ) != 0 )
-		return rc;
-
+	}
+	
 	*ppos += len;
 	return len;
 }
@@ -392,8 +569,7 @@ static struct file_operations quickusb_hspio_data_fops = {
  */
 
 static int quickusb_ttyusb_open ( struct tty_struct *tty,
-				  struct usb_serial_port *port,
-				  struct file *file ) {
+                                  struct usb_serial_port *port ) {
 	struct quickusb_device *quickusb
 		= usb_get_intfdata ( port->serial->interface );
 	int rc;
@@ -402,7 +578,7 @@ static int quickusb_ttyusb_open ( struct tty_struct *tty,
 					    QUICKUSB_HSPPMODE_SLAVE ) ) != 0 )
 		return rc;
 
-	if ( ( rc = usb_serial_generic_open ( tty, port, file ) ) != 0 )
+	if ( ( rc = usb_serial_generic_open ( tty, port ) ) != 0 )
 		return rc;
 
 	return 0;
@@ -415,6 +591,9 @@ static struct usb_serial_driver quickusb_serial = {
 	},
 	.open		= quickusb_ttyusb_open,
 	.id_table	= quickusb_ids,
+//	.num_interrupt_in = NUM_DONT_CARE,
+//	.num_bulk_in	= NUM_DONT_CARE,
+//	.num_bulk_out	= NUM_DONT_CARE,
 	.num_ports	= 1,
 };
 
@@ -482,7 +661,7 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 				      void *private_data,
 				      const char *subdev_fmt, ... ) {
 	struct quickusb_subdev *subdev = &quickusb->subdev[subdev_idx];
-	struct usb_interface *interface = quickusb->interface;
+	//struct usb_interface *interface = quickusb->interface;
 	unsigned int dev_minor;
 	va_list ap;
 	int rc;
@@ -500,14 +679,13 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 	vsnprintf ( subdev->name, sizeof ( subdev->name ), subdev_fmt, ap );
 	va_end ( ap );
 
-	/* Create class device */
-	subdev->class_dev = device_create ( quickusb_class, NULL, subdev->dev,
-					    &interface->dev, "%s",
-					    subdev->name );
-	if ( IS_ERR ( subdev->class_dev ) ) {
-		rc = PTR_ERR ( subdev->class_dev );
-		goto err_class;
-	}
+        /* Create a device */
+        subdev->devp = device_create( quickusb_class, NULL, subdev->dev,
+                                      NULL, subdev->name );
+        if ( IS_ERR ( subdev->devp ) ) {
+                rc = PTR_ERR ( subdev->devp );
+                goto err_class;
+        }
 
 	return 0;
 
@@ -523,8 +701,8 @@ static void quickusb_deregister_subdev ( struct quickusb_device *quickusb,
 	if ( ! subdev->f_op )
 		return;
 
-	/* Remove class device */
-	device_destroy ( quickusb_class, subdev->dev );
+	/* Remove device */
+        device_destroy ( quickusb_class, subdev->dev );
 
 	/* Clear subdev structure */
 	memset ( subdev, 0, sizeof ( *subdev ) );
@@ -691,6 +869,7 @@ static struct usb_driver quickusb_driver = {
 	.disconnect	= quickusb_disconnect,
 	.id_table	= quickusb_ids,
 };
+
 
 /****************************************************************************
  *

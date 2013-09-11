@@ -99,6 +99,9 @@ static inline int quickusb_write_setting ( struct usb_device *usb,
 static inline int quickusb_read_default ( struct usb_device *usb,
 					  unsigned int address,
 					  uint16_t *setting ) {
+	/* Actually, this is non-trivial; it's implemented by patching the firmware
+	and uploading it to the device. That's really ugly. It can be done by the
+        MS Windows library, but really doesn't belong in a kernel driver! Un-implemented */
 	return -ENOTTY;
 }
 
@@ -114,6 +117,7 @@ static inline int quickusb_read_default ( struct usb_device *usb,
 static inline int quickusb_write_default ( struct usb_device *usb,
 					   unsigned int address,
 					   uint16_t setting ) {
+	/* Unimplemented: See note on quickusb_read_default(). */
 	return -ENOTTY;
 }
 
