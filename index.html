@@ -1,0 +1,57 @@
+<!DOCTYPE HTML><html><head><meta charset="utf-8"><link rel="stylesheet" type="text/css" href="../style.css"><title>QuickUSB driver</title></head><body class=program> <!-- IMPORTANT: this webpage is probably generated from a Makefile. Don't edit this; edit 
+the source. -->
+
+<h1>QuickUSB driver for Linux</h1>
+
+<h2>Introduction</h2>
+
+<p>The Bitwise Systems <a href="http://www.bitwisesys.com/qusb2-p/qusb2.htm">QuickUSB</a> device is a USB 2.0 interface which implements a <b>fast 16-bit parallel port</b> capable of a sustained 12 MB/s with handshaking,
+  2x general purpose 8-bit I/O ports, I2C, and 2x RS-232 ports.</p>
+
+<p>It is supplied with a binary blob, rather than a proper GPL'd Linux kernel driver, so we wrote one. The driver is hotplug-capable (it won't segfault even if the device is unplugged while in use), and creates standard /dev/ nodes, <tt>/dev/qu0g{a-e}</tt> for the general purpose ports, and <tt>/dev/qu0hd</tt> for the high-speed data.
+A small C-program, <tt>setquickusb</tt>, handles the ioctls for the GPIO port-direction mask.</p>
+
+<p>The driver has also been used at XFEL at DESY, and they have enhanced it to include a scatter-gather API for aiding the transfer of many MB of data at a time. The driver works under recent 3.x kernels; it can also be built under 2.4/2.6.</p>
+
+<p>Consider also alternatives, such as the <a href="http://lea.hamradio.si/~s57uuu/uuusb/">Uncomplicated Universal Usb board </a></p>
+
+
+<h2>Bugs</h2>
+
+<p>The QUSB has 2x RS232 ports and I2C, but this driver doesn't support them (it would be relatively straightforward to add),</p>
+
+<p>The default power-on direction of the GPIO ports can only be changed by dynamically patching the firmware; this requires the Windows tool.</p>
+
+<p>There is no way to clear the QUSB's internal FIFO to start from a known empty position! Furthermore, the minimum block-size that can be transferred is 64 bytes. This means that there is an uncertainty of 64 bytes in the position within the data-stream.</p>
+
+
+<h2>Installation</h2>
+
+<ul><li>To install, simply: <tt>make && sudo make install</tt>
+<li>This is Free Software released under the GNU GPL v2+.  Please feel free to take it, modify it, package it etc. 
+<li>Author: Michael Brown, now maintained by Richard Neill. Do ask if you would like further information and assistance. 
+</ul>
+
+
+<h2>Notes</h2>
+
+<p>This was originally written as part of my <a href="http://www.richardneill.org/phd">PhD Infrared Camera system</a>. It should be applicable for wider usage.<br>
+ <i>Please ignore references to "ircam" (the IR-camera system).</i></p>
+
+
+<h2>Download</h2>
+
+<a href="quickusb.tgz">quickusb.tgz</a>
+
+
+<h2>Documents</h2>
+
+<p>Some selected files, from the tarball:<br>
+ <!-- NB links are correct wrt the www/ directory after 'make www', not necessarily in the source. -->
+<a href="README.txt">README.txt</a></p>
+
+<h2>Navigation</h2> <p>Return to <a href="../">all programs</a>, <a href="/">site home</a>.</p>
+
+</body></html>
+
+
