@@ -884,7 +884,7 @@ static int quickusb_init ( void ) {
 	}
 
 	if ( ( rc = usb_serial_register_drivers ( quickusb_serial_drivers,
-						  "quickusb",
+						  "quickusb-serial",
 						  quickusb_ids ) ) != 0 )
 		goto err_usbserial;
 
