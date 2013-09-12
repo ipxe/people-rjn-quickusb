@@ -1,0 +1,19 @@
+# setquickusb(1) completion
+#
+have setquickusb &&
+_setquickusb()
+{
+        local cur
+
+        COMPREPLY=()
+        cur=${COMP_WORDS[COMP_CWORD]}
+
+        if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $( compgen -W '-h --outputs=' -- $cur ) )
+        else
+		cur=${cur:=/dev/qu}
+                _filedir
+                return 0
+        fi
+} &&
+complete -F _setquickusb $filenames setquickusb

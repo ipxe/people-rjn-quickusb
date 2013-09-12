@@ -1,0 +1,98 @@
+<HTML><HEAD><TITLE>Manpage of SETQUICKUSB</TITLE>
+</HEAD><BODY><STYLE>*{font-family:monospace}</STYLE>
+<H1>SETQUICKUSB</H1>
+Section: User Commands (1)<BR>Updated: July 2008<BR><A HREF="#index">Index</A>
+<A HREF="../index.html">Return to Main Contents</A><HR>
+
+<A NAME="lbAB">&nbsp;</A>
+<H2>NAME</H2>
+
+setquickusb - Configure QuickUSB port properties
+<A NAME="lbAC">&nbsp;</A>
+<H2>SYNOPSIS</H2>
+
+<BR>&nbsp;Configures&nbsp;the&nbsp;QuickUSB&nbsp;port&nbsp;direction&nbsp;for&nbsp;each&nbsp;bit.
+<P>
+<A NAME="lbAD">&nbsp;</A>
+<H2>DESCRIPTION</H2>
+
+<P>
+USAGE: setquickusb --OPTION [ ARG ] DEVICE
+<P>
+setquickusb reads or sets the port parameters for a QuickUSB module.
+The value to be set is any integer from 0-255, specified in either decimal or:
+hexadecimal form; when reading, setquickusb returns values in hexadecimal.
+<P>
+OPTIONS:
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;--outputs&nbsp;&nbsp;DEVICE
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;gets&nbsp;the&nbsp;current&nbsp;output-mask&nbsp;for&nbsp;DEVICE,&nbsp;and&nbsp;prints&nbsp;it.
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;--outputs=0x12&nbsp;&nbsp;DEVICE
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sets&nbsp;the&nbsp;output-mask&nbsp;to&nbsp;0x12
+<P>
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;--setting&nbsp;0x03&nbsp;&nbsp;DEVICE
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;gets&nbsp;the&nbsp;current&nbsp;value&nbsp;of&nbsp;option&nbsp;register&nbsp;0x03,&nbsp;and&nbsp;prints&nbsp;it.
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;--setting&nbsp;0x03=0x02&nbsp;&nbsp;DEVICE
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sets&nbsp;the&nbsp;option&nbsp;register&nbsp;at&nbsp;address&nbsp;0x03&nbsp;to&nbsp;a&nbsp;value&nbsp;of&nbsp;0x02.
+<P>
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;--default-outputs&nbsp;&nbsp;DEVICE
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;--default-outputs=0x34&nbsp;&nbsp;DEVICE
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;--default-levels&nbsp;DEVICE
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;--default-levels=0x56&nbsp;DEVICE
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;these&nbsp;should&nbsp;set&nbsp;the&nbsp;default&nbsp;output&nbsp;mask&nbsp;and&nbsp;values&nbsp;for&nbsp;the&nbsp;device
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;at&nbsp;power-on.&nbsp;Not&nbsp;yet&nbsp;implemented&nbsp;in&nbsp;the&nbsp;kernel&nbsp;driver.
+<P>
+EXAMPLE:
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;setquickusb&nbsp;--outputs=0xf0&nbsp;/dev/qu0ga
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Result:&nbsp;&nbsp;Port&nbsp;A&nbsp;has&nbsp;bits&nbsp;7-4&nbsp;set&nbsp;as&nbsp;outputs,&nbsp;and&nbsp;3-0&nbsp;as&nbsp;inputs.
+<P>
+DEVICE NAMES:
+DEVICE is the relevant QuickUSB device and port. For example:
+<TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TT>/dev/qu0ga      First QUSB device, General Purpose Port A<BR>
+<TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TT>/dev/qu0gb      First QUSB device, General Purpose Port B<BR>
+<TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TT>/dev/qu0gc      First QUSB device, General Purpose Port C<BR>
+<TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TT>/dev/qu0gd      First QUSB device, General Purpose Port D<BR>
+<TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TT>/dev/qu0ge      First QUSB device, General Purpose Port E<BR>
+<P>
+<TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TT>/dev/qu0hc      First QUSB device, High Speed Port, Control<BR>
+<TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TT>/dev/qu0hd      First QUSB device, High Speed Port, Data<BR>
+<P>
+Note 1: the high-speed port uses the same pins as G.P. ports B,D.
+Note 2: the 16-bit HSP (/dev/qu0hd) is little-endian. Byte B is read first.
+Note 3: the RS232 serial ports and I2C are not implemented in this driver.
+<P>
+WARNING:
+<TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TT>Setting the output mask on a port configured for high-speed<BR>
+<TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TT>(either hc, or the corresponding gb,gd) will MESS IT UP.<BR>
+<TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TT>Don't do it!<BR>
+<P>
+<A NAME="lbAE">&nbsp;</A>
+<H2>AUTHOR</H2>
+
+The maintainer of setquickusb and this manual page is Richard Neill, &lt;<A HREF="mailto:quickusb#AT(spamblock)#richardneill.org">quickusb#AT(spamblock)#richardneill.org</A>&gt;
+<BR>
+
+Copyright July 2008; this is Free Software (GPL v3+), see the source for copying conditions.
+<P>
+<A NAME="lbAF">&nbsp;</A>
+<H2>SEE ALSO</H2>
+
+<B><A HREF="../man1/ircam.1.html">ircam</A></B>(1)
+
+<P>
+
+<HR>
+<A NAME="index">&nbsp;</A><H2>Index</H2>
+<DL>
+<DT><A HREF="#lbAB">NAME</A><DD>
+<DT><A HREF="#lbAC">SYNOPSIS</A><DD>
+<DT><A HREF="#lbAD">DESCRIPTION</A><DD>
+<DT><A HREF="#lbAE">AUTHOR</A><DD>
+<DT><A HREF="#lbAF">SEE ALSO</A><DD>
+</DL>
+<HR>
+This document was created by
+<A HREF="http://localhost/cgi-bin/man/man2html">man2html</A>,
+using the manual pages.<BR>
+Time: 22:57:35 GMT, September 11, 2013
+</BODY>
+</HTML>
