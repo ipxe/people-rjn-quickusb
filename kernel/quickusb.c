@@ -67,7 +67,6 @@ struct quickusb_device {
 	struct quickusb_gppio gppio[QUICKUSB_MAX_GPPIO];
 	struct quickusb_hspio hspio;
 	struct quickusb_subdev subdev[QUICKUSB_MAX_SUBDEVS];
-	void *serial_intfdata;
 };
 
 static void quickusb_delete ( struct kref *kref ) {
@@ -84,7 +83,7 @@ static DEFINE_SEMAPHORE ( quickusb_lock );
 
 static struct class *quickusb_class;
 
-static int debug = 0;
+static bool debug = 0;
 static int dev_major = 0;
 
 static struct usb_device_id quickusb_ids[];
@@ -591,10 +590,11 @@ static struct usb_serial_driver quickusb_serial = {
 	},
 	.open		= quickusb_ttyusb_open,
 	.id_table	= quickusb_ids,
-//	.num_interrupt_in = NUM_DONT_CARE,
-//	.num_bulk_in	= NUM_DONT_CARE,
-//	.num_bulk_out	= NUM_DONT_CARE,
 	.num_ports	= 1,
+};
+
+static struct usb_serial_driver * const quickusb_serial_drivers[] = {
+	&quickusb_serial, NULL
 };
 
 /****************************************************************************
@@ -661,7 +661,6 @@ static int quickusb_register_subdev ( struct quickusb_device *quickusb,
 				      void *private_data,
 				      const char *subdev_fmt, ... ) {
 	struct quickusb_subdev *subdev = &quickusb->subdev[subdev_idx];
-	//struct usb_interface *interface = quickusb->interface;
 	unsigned int dev_minor;
 	va_list ap;
 	int rc;
@@ -802,14 +801,6 @@ static int quickusb_probe ( struct usb_interface *interface,
 	quickusb->board = board;
 	list_add_tail ( &quickusb->list, &pre_existing_quickusb->list );
 
-
-	/* Register ttyUSB device */
-	if ( ( rc = usb_serial_probe ( interface, id ) ) != 0 ) {
-		printk ( KERN_ERR "quickusb unable to register ttyUSB\n" );
-		goto err;
-	}
-	quickusb->serial_intfdata = usb_get_intfdata ( interface );
-
 	/* Record driver private data */
 	usb_set_intfdata ( interface, quickusb );
 
@@ -825,11 +816,6 @@ static int quickusb_probe ( struct usb_interface *interface,
  err:
 	usb_set_intfdata ( interface, NULL );
 	if ( quickusb ) {
-		if ( quickusb->serial_intfdata ) {
-			usb_set_intfdata ( interface,
-					   quickusb->serial_intfdata );
-			usb_serial_disconnect ( interface );
-		}
 		quickusb_deregister_devices ( quickusb );
 		list_del ( &quickusb->list );
 		kref_put ( &quickusb->kref, quickusb_delete );
@@ -846,11 +832,6 @@ static void quickusb_disconnect ( struct usb_interface *interface ) {
 
 	down ( &quickusb_lock );
 	usb_set_intfdata ( interface, NULL );
-	if ( quickusb->serial_intfdata ) {
-		usb_set_intfdata ( interface,
-				   quickusb->serial_intfdata );
-		usb_serial_disconnect ( interface );
-	}
 	quickusb_deregister_devices ( quickusb );
 	list_del ( &quickusb->list );
 	up ( &quickusb_lock );
@@ -902,7 +883,9 @@ static int quickusb_init ( void ) {
 		goto err_class;
 	}
 
-	if ( ( rc = usb_serial_register ( &quickusb_serial ) ) != 0 )
+	if ( ( rc = usb_serial_register_drivers ( quickusb_serial_drivers,
+						  "quickusb",
+						  quickusb_ids ) ) != 0 )
 		goto err_usbserial;
 
 	if ( ( rc = usb_register ( &quickusb_driver ) ) != 0 )
@@ -911,7 +894,7 @@ static int quickusb_init ( void ) {
 	return 0;
 
  err_usb:
-	usb_serial_deregister ( &quickusb_serial );
+	usb_serial_deregister_drivers ( quickusb_serial_drivers );
  err_usbserial:
 	class_destroy ( quickusb_class );
  err_class:
@@ -922,7 +905,7 @@ static int quickusb_init ( void ) {
 
 static void quickusb_exit ( void ) {
 	usb_deregister ( &quickusb_driver );
-	usb_serial_deregister ( &quickusb_serial );
+	usb_serial_deregister_drivers ( quickusb_serial_drivers );
 	class_destroy ( quickusb_class );
 	unregister_chrdev ( dev_major, "quickusb" );
 }
