@@ -55,6 +55,9 @@ Bug: there is no way for the USB host to purge the the QUSB's internal FIFO to s
 
 This device (with our driver) has been used in the physics departments at Cambridge University (COAST telescope) and at DESY (the XFEL project).
 
+This was originally developed for my PhD in Astrophysics, see http://www.richardneill.org/phd . 
+It now lives in a public GIT repository at: http://git.ipxe.org/people/rjn/quickusb.git
+
 
 
 AUTHORS
