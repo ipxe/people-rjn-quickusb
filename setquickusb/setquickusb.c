@@ -12,9 +12,9 @@
  */
 
 /*
- * TODO: This doesn't yet implement the RS-232 serial ports. Also, bad things will
- * happen when we change direction of the high-speed ports, or their corresponding
- * general-purpose ports
+ * TODO: This doesn't yet implement the RS-232 serial ports, nor I2C nor SPI
+ * Also, bad things will happen when we change direction of the high-speed ports, 
+ * or their corresponding general-purpose ports
  */
 
 
@@ -299,7 +299,8 @@ void printhelp () {
 	"\n"
 	"Note 1: the high-speed port uses the same pins as G.P. ports B,D.\n"
 	"Note 2: the 16-bit HSP (/dev/qu0hd) is little-endian. Byte B is read first.\n"
-	"Note 3: the RS232 serial ports and I2C are not implemented in this driver.\n"
+	"Note 3: the RS232, I2C and SPI ports are not implemented in this driver.\n"
+	"Note 4: the HSP can be opened in slave mode as /dev/ttyUSB0, or master mode as qu0hd.\n"
 	"\n"
 	"WARNING:\n"
 	"	Setting the output mask on a port configured for high-speed\n"
