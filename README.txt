@@ -37,7 +37,7 @@ The mode is automatically selected depending on which device is opened. It is li
 
 The other ports /dev/qu0ga, /dev/qu0gc, /dev/qu0ge are GPIO ports, and the direction of each bit may be controlled separately, by setquickusb.
 
-Simply read and write to them as normal, using cat/echo/dd/read()/write() etc.
+Simply read and write to them as normal, using cat,echo,dd,read(),write() etc.
 
 
 NOTES
