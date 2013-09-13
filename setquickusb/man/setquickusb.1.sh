@@ -27,7 +27,7 @@ DATE="July 2008"
 SEE_ALSO=( "ircam (1)" )
 
 #Prefix each line with a leading space? Prevent paragraphs from being line-wrapped. true/false
-LEADING_SPACE=false
+LEADING_SPACE=true
 
 #Author and copyright (optional string).
 LICENSE="GPL v3+"
